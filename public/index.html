@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Emby Icons 管理面板</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">E</div>
+          <div>
+            <h1>Emby Icons</h1>
+            <p>配置管理</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <a class="button button-secondary" href="/emby-icons.json" target="_blank" rel="noreferrer">查看文件</a>
+          <button class="button button-secondary" id="reload-button" type="button">重新加载</button>
+          <button class="button button-primary" id="save-button" type="button">保存到 Cloudflare</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="status-band" aria-live="polite">
+        <div class="status-inner">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">正在连接 Cloudflare...</span>
+          <span class="document-state" id="document-state">未修改</span>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <nav class="tabs" aria-label="编辑模式">
+          <button class="tab is-active" type="button" data-tab="structured">结构化编辑</button>
+          <button class="tab" type="button" data-tab="json">原始 JSON</button>
+        </nav>
+
+        <section class="panel is-active" id="structured-panel">
+          <div class="metadata-grid">
+            <label class="field">
+              <span>名称</span>
+              <input id="document-name" type="text" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>描述</span>
+              <input id="document-description" type="text" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="section-heading">
+            <div>
+              <h2>图标列表</h2>
+              <span id="icon-count">0 项</span>
+            </div>
+            <button class="button button-secondary" id="add-icon-button" type="button">+ 添加图标</button>
+          </div>
+
+          <div class="icon-list" id="icon-list"></div>
+          <div class="empty-state" id="empty-state" hidden>
+            <strong>暂无图标</strong>
+            <button class="button button-primary" id="empty-add-button" type="button">添加第一个图标</button>
+          </div>
+        </section>
+
+        <section class="panel" id="json-panel">
+          <div class="json-toolbar">
+            <div id="json-message">JSON 有效</div>
+            <button class="button button-secondary" id="format-button" type="button">格式化</button>
+          </div>
+          <label class="sr-only" for="json-editor">emby-icons.json 内容</label>
+          <textarea id="json-editor" spellcheck="false" autocomplete="off"></textarea>
+        </section>
+      </div>
+    </main>
+
+    <template id="icon-row-template">
+      <article class="icon-row">
+        <div class="row-index" aria-hidden="true"></div>
+        <div class="icon-preview"><img alt="" /></div>
+        <label class="field compact-field">
+          <span>图标名称</span>
+          <input type="text" data-field="name" autocomplete="off" />
+        </label>
+        <label class="field compact-field url-field">
+          <span>图片地址</span>
+          <input type="url" data-field="url" autocomplete="off" />
+        </label>
+        <div class="row-actions">
+          <button class="icon-button move-up" type="button" title="上移" aria-label="上移">↑</button>
+          <button class="icon-button move-down" type="button" title="下移" aria-label="下移">↓</button>
+          <button class="icon-button danger delete-icon" type="button" title="删除" aria-label="删除">×</button>
+        </div>
+      </article>
+    </template>
+
+    <dialog id="token-dialog">
+      <form method="dialog" id="token-form">
+        <div class="dialog-heading">
+          <h2>管理员验证</h2>
+          <button class="icon-button" value="cancel" formmethod="dialog" aria-label="关闭" title="关闭">×</button>
+        </div>
+        <label class="field">
+          <span>管理员令牌</span>
+          <input id="admin-token" type="password" autocomplete="current-password" required />
+        </label>
+        <p class="dialog-error" id="token-error"></p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" value="cancel" formmethod="dialog">取消</button>
+          <button class="button button-primary" value="default" type="submit">验证并保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
