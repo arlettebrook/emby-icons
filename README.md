@@ -21,7 +21,7 @@ npm run dev
 当前开发分支是 `master`。提交代码并推送到 GitHub：
 
 ```powershell
-git add README.md .dev.vars.example .gitignore functions package.json package-lock.json public scripts test wrangler.jsonc
+git add README.md .dev.vars.example .gitignore functions package.json package-lock.json public scripts test
 git commit -m "Add Cloudflare Pages icon manager"
 git push origin master
 ```
@@ -45,6 +45,8 @@ git push origin master
 
 点击 **Save and Deploy**。仓库根目录的 `functions/` 会由 Cloudflare 自动识别为 Pages Functions，以后每次推送到 `master` 都会自动部署。
 
+仓库不包含 `wrangler.toml` 或 `wrangler.jsonc`。这是有意设计：KV 和 Secret 由 Cloudflare Dashboard 管理，避免出现“此项目的绑定通过 Wrangler 配置管理”而无法在控制台添加绑定。
+
 ### 3. 创建并绑定 KV
 
 首次部署完成后，在 Cloudflare Dashboard 创建一个 KV namespace，例如 `emby-icons-data`。
@@ -64,7 +66,9 @@ git push origin master
 - Variable name：`ADMIN_TOKEN`
 - Value：一个足够长且随机的管理员密码
 
-同样建议为 Production 和 Preview 分别设置。保存绑定和 Secret 后，在 **Deployments** 页面点击 **Retry deployment**，或向 `master` 再推送一次提交。
+同样建议为 Production 和 Preview 分别设置。变量名区分大小写，必须是 `ADMIN_TOKEN`。值只填写令牌本身，不要包含引号或 `ADMIN_TOKEN=` 前缀。
+
+保存 KV Binding 和 Secret 后，在 **Deployments** 页面打开最新部署并点击 **Retry deployment**。已有部署不会自动获得刚修改的绑定。浏览器中重新打开管理页面；若之前输入过错误令牌，刷新后再次保存并输入新令牌即可。
 
 管理员令牌只保存在 Cloudflare Secret 和浏览器当前会话的 `sessionStorage` 中，不会写入仓库。
 

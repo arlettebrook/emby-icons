@@ -77,9 +77,21 @@ async function readDocument(request, env) {
   return { text, etag: await createEtag(text), source: stored === null ? "seed" : "kv" };
 }
 
-function isAuthorized(request, env) {
-  if (!env.ADMIN_TOKEN) return false;
-  return request.headers.get("Authorization") === `Bearer ${env.ADMIN_TOKEN}`;
+async function isAuthorized(request, env) {
+  const configuredToken = String(env.ADMIN_TOKEN || "").trim();
+  const authorization = request.headers.get("Authorization") || "";
+  const suppliedToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+
+  if (!configuredToken || !suppliedToken) return false;
+
+  const encoder = new TextEncoder();
+  const [configuredDigest, suppliedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(configuredToken)),
+    crypto.subtle.digest("SHA-256", encoder.encode(suppliedToken)),
+  ]);
+  const configuredBytes = new Uint8Array(configuredDigest);
+  const suppliedBytes = new Uint8Array(suppliedDigest);
+  return configuredBytes.every((byte, index) => byte === suppliedBytes[index]);
 }
 
 export async function handleGet(request, env, cacheControl = "no-cache") {
@@ -104,7 +116,7 @@ export async function handlePut(request, env) {
     return jsonResponse({ error: "服务端尚未配置 ADMIN_TOKEN" }, { status: 503 });
   }
 
-  if (!isAuthorized(request, env)) {
+  if (!(await isAuthorized(request, env))) {
     return jsonResponse({ error: "管理员令牌无效" }, { status: 401 });
   }
 

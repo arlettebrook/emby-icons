@@ -61,6 +61,22 @@ test("PUT validates and persists a document", async () => {
   assert.deepEqual(await stored.json(), updated);
 });
 
+test("PUT ignores accidental whitespace around the configured secret", async () => {
+  const env = createEnvironment();
+  env.ADMIN_TOKEN = "  secret-token\n";
+  const request = new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(seed),
+  });
+
+  const response = await handlePut(request, env);
+  assert.equal(response.status, 200);
+});
+
 test("PUT rejects invalid icon URLs", async () => {
   const env = createEnvironment();
   const invalid = { ...seed, icons: [{ name: "Bad", url: "javascript:alert(1)" }] };
