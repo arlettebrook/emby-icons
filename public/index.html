@@ -142,7 +142,7 @@
       <form method="dialog" id="import-form">
         <div class="dialog-heading">
           <h2>导入图标 JSON</h2>
-          <button class="icon-button" value="cancel" formmethod="dialog" aria-label="关闭" title="关闭">×</button>
+          <button class="icon-button" id="import-close-button" type="button" aria-label="关闭" title="关闭">×</button>
         </div>
         <p class="dialog-lead">导入只会追加 icons，name 和 description 会保留当前配置。重复名称会自动跳过，保存到 Cloudflare KV 需要管理员令牌。</p>
         <div class="remote-import-row">
@@ -162,7 +162,7 @@
         </label>
         <p class="dialog-error" id="import-error"></p>
         <div class="dialog-actions">
-          <button class="button button-secondary" value="cancel" formmethod="dialog">取消</button>
+          <button class="button button-secondary" id="import-cancel-button" type="button">取消</button>
           <button class="button button-primary" value="default" type="submit">导入并保存</button>
         </div>
       </form>

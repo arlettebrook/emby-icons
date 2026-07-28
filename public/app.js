@@ -17,6 +17,8 @@ const elements = {
   exportButton: document.querySelector("#export-button"),
   formatButton: document.querySelector("#format-button"),
   importButton: document.querySelector("#import-button"),
+  importCancelButton: document.querySelector("#import-cancel-button"),
+  importCloseButton: document.querySelector("#import-close-button"),
   importDialog: document.querySelector("#import-dialog"),
   importEditor: document.querySelector("#import-editor"),
   importError: document.querySelector("#import-error"),
@@ -226,11 +228,9 @@ async function copyDocument() {
 
 async function copyPublicConfig() {
   try {
-    const response = await fetch("/emby-icons.json", { cache: "no-store" });
-    const raw = await response.text();
-    if (!response.ok) throw new Error("公开配置暂不可用，请先保存 KV 数据");
-    await navigator.clipboard.writeText(raw);
-    showToast("公开配置已复制到剪贴板");
+    const publicUrl = new URL("/emby-icons.json", window.location.origin).href;
+    await navigator.clipboard.writeText(publicUrl);
+    showToast("公开配置 URL 已复制到剪贴板");
   } catch (error) {
     showToast(error.message || "复制失败，请检查浏览器权限");
   }
@@ -592,6 +592,8 @@ elements.addButton.addEventListener("click", addIcon);
 elements.emptyAddButton.addEventListener("click", addIcon);
 elements.importButton.addEventListener("click", openImportDialog);
 elements.emptyImportButton.addEventListener("click", openImportDialog);
+elements.importCancelButton.addEventListener("click", () => elements.importDialog.close());
+elements.importCloseButton.addEventListener("click", () => elements.importDialog.close());
 elements.exportButton.addEventListener("click", exportDocument);
 elements.copyButton.addEventListener("click", copyDocument);
 elements.copyPublicButton.addEventListener("click", copyPublicConfig);
@@ -616,7 +618,10 @@ elements.tokenForm.addEventListener("submit", (event) => {
   if (token) saveDocument(token);
 });
 
-elements.importForm.addEventListener("submit", importDocument);
+elements.importForm.addEventListener("submit", (event) => {
+  if (event.submitter?.value === "cancel") return;
+  importDocument(event);
+});
 
 window.addEventListener("beforeunload", (event) => {
   if (!dirty) return;
