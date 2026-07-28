@@ -1,10 +1,13 @@
 const elements = {
   addButton: document.querySelector("#add-icon-button"),
   count: document.querySelector("#icon-count"),
+  clearSearch: document.querySelector("#clear-search"),
   description: document.querySelector("#document-description"),
   dirtyState: document.querySelector("#document-state"),
   emptyAddButton: document.querySelector("#empty-add-button"),
   emptyState: document.querySelector("#empty-state"),
+  emptyTitle: document.querySelector("#empty-title"),
+  emptyCopy: document.querySelector("#empty-copy"),
   formatButton: document.querySelector("#format-button"),
   iconList: document.querySelector("#icon-list"),
   jsonEditor: document.querySelector("#json-editor"),
@@ -13,8 +16,11 @@ const elements = {
   reloadButton: document.querySelector("#reload-button"),
   rowTemplate: document.querySelector("#icon-row-template"),
   saveButton: document.querySelector("#save-button"),
+  searchInput: document.querySelector("#icon-search"),
   statusDot: document.querySelector("#status-dot"),
   statusText: document.querySelector("#status-text"),
+  overviewCount: document.querySelector("#overview-count"),
+  overviewSource: document.querySelector("#overview-source"),
   tokenDialog: document.querySelector("#token-dialog"),
   tokenError: document.querySelector("#token-error"),
   tokenForm: document.querySelector("#token-form"),
@@ -28,6 +34,7 @@ let activeTab = "structured";
 let dirty = false;
 let saving = false;
 let toastTimer;
+let filterQuery = "";
 
 function showToast(message) {
   elements.toast.textContent = message;
@@ -39,6 +46,7 @@ function showToast(message) {
 function setConnection(message, state = "online") {
   elements.statusText.textContent = message;
   elements.statusDot.className = `status-dot ${state}`;
+  elements.overviewSource.textContent = state === "error" ? "错误" : message.includes("KV") ? "KV" : "仓库";
 }
 
 function setDirty(value) {
@@ -88,10 +96,12 @@ function syncFromJson() {
     documentData = next;
     elements.jsonMessage.textContent = "JSON 有效";
     elements.jsonMessage.classList.remove("invalid");
+    elements.jsonMessage.parentElement.classList.remove("invalid");
     return true;
   } catch (error) {
     elements.jsonMessage.textContent = error.message;
     elements.jsonMessage.classList.add("invalid");
+    elements.jsonMessage.parentElement.classList.add("invalid");
     return false;
   }
 }
@@ -109,10 +119,21 @@ function updatePreview(image, url) {
 
 function renderIconList() {
   elements.iconList.replaceChildren();
-  elements.count.textContent = `${documentData.icons.length} 项`;
-  elements.emptyState.hidden = documentData.icons.length > 0;
+  const normalizedQuery = filterQuery.trim().toLocaleLowerCase();
+  const visibleIcons = documentData.icons
+    .map((icon, index) => ({ icon, index }))
+    .filter(({ icon }) => !normalizedQuery || `${icon.name} ${icon.url}`.toLocaleLowerCase().includes(normalizedQuery));
 
-  documentData.icons.forEach((icon, index) => {
+  elements.count.textContent = normalizedQuery
+    ? `${visibleIcons.length} / ${documentData.icons.length} 项`
+    : `${documentData.icons.length} 项`;
+  elements.overviewCount.textContent = String(documentData.icons.length);
+  elements.emptyState.hidden = visibleIcons.length > 0;
+  elements.emptyTitle.textContent = normalizedQuery ? "没有匹配结果" : "暂无图标";
+  elements.emptyCopy.textContent = normalizedQuery ? "换一个关键词，或清除搜索条件。" : "添加你的第一个图标开始吧。";
+  elements.emptyAddButton.hidden = Boolean(normalizedQuery);
+
+  visibleIcons.forEach(({ icon, index }) => {
     const row = elements.rowTemplate.content.firstElementChild.cloneNode(true);
     const nameInput = row.querySelector('[data-field="name"]');
     const urlInput = row.querySelector('[data-field="url"]');
@@ -140,15 +161,18 @@ function renderJson() {
   elements.jsonEditor.value = `${JSON.stringify(documentData, null, 2)}\n`;
   elements.jsonMessage.textContent = "JSON 有效";
   elements.jsonMessage.classList.remove("invalid");
+  elements.jsonMessage.parentElement.classList.remove("invalid");
 }
 
 function addIcon() {
   if (activeTab === "json" && !syncFromJson()) return;
   syncStructuredFields();
   documentData.icons.push({ name: "", url: "" });
+  filterQuery = "";
+  elements.searchInput.value = "";
   renderStructured();
   setDirty(true);
-  requestAnimationFrame(() => elements.iconList.lastElementChild?.querySelector('[data-field="name"]')?.focus());
+  requestAnimationFrame(() => [...elements.iconList.children].find((row) => row.dataset.index === String(documentData.icons.length - 1))?.querySelector('[data-field="name"]')?.focus());
 }
 
 function switchTab(nextTab) {
@@ -311,6 +335,18 @@ elements.jsonEditor.addEventListener("input", () => {
 elements.formatButton.addEventListener("click", () => {
   if (!syncFromJson()) return;
   renderJson();
+});
+
+elements.searchInput.addEventListener("input", () => {
+  filterQuery = elements.searchInput.value;
+  renderIconList();
+});
+
+elements.clearSearch.addEventListener("click", () => {
+  filterQuery = "";
+  elements.searchInput.value = "";
+  renderIconList();
+  elements.searchInput.focus();
 });
 
 elements.addButton.addEventListener("click", addIcon);
