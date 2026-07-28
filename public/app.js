@@ -63,8 +63,33 @@ let hasDocument = false;
 let forceSaveRequested = false;
 let sortMode = "manual";
 let renderLimit = 60;
+let searchIndex = [];
+let renderFrame = 0;
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
+
+function rebuildSearchIndex() {
+  searchIndex = documentData.icons.map((icon) => `${icon.name} ${icon.url}`.toLocaleLowerCase());
+}
+
+function scheduleIconListRender() {
+  if (renderFrame) cancelAnimationFrame(renderFrame);
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
+    renderIconList();
+  });
+}
+
+function sortDocumentIcons(mode) {
+  if (mode === "manual") return false;
+  const direction = mode === "name-desc" ? -1 : 1;
+  const before = documentData.icons.map((icon) => icon);
+  documentData.icons.sort((left, right) => {
+    const byName = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" });
+    return direction * byName;
+  });
+  return before.some((icon, index) => icon !== documentData.icons[index]);
+}
 
 function showConflict() {
   conflictActive = true;
@@ -171,6 +196,11 @@ async function importDocument(event) {
     }
 
     documentData.icons.push(...additions);
+    rebuildSearchIndex();
+    if (sortMode !== "manual") {
+      sortDocumentIcons(sortMode);
+      rebuildSearchIndex();
+    }
     documentData.name = documentData.name.trim() || "Emby Icons";
     hasDocument = true;
     renderStructured();
@@ -302,6 +332,11 @@ function syncFromJson() {
     const validationError = validDocument(next);
     if (validationError) throw new Error(validationError);
     documentData = next;
+    rebuildSearchIndex();
+    if (activeTab === "json") {
+      sortMode = "manual";
+      elements.iconSort.value = sortMode;
+    }
     elements.jsonMessage.textContent = "JSON 有效";
     elements.jsonMessage.classList.remove("invalid");
     elements.jsonMessage.parentElement.classList.remove("invalid");
@@ -335,15 +370,11 @@ function updatePreview(image, url) {
 
 function renderIconList() {
   elements.iconList.replaceChildren();
+  if (searchIndex.length !== documentData.icons.length) rebuildSearchIndex();
   const normalizedQuery = filterQuery.trim().toLocaleLowerCase();
   const visibleIcons = documentData.icons
     .map((icon, index) => ({ icon, index }))
-    .filter(({ icon }) => !normalizedQuery || `${icon.name} ${icon.url}`.toLocaleLowerCase().includes(normalizedQuery));
-
-  if (sortMode === "name-asc" || sortMode === "name-desc") {
-    const direction = sortMode === "name-asc" ? 1 : -1;
-    visibleIcons.sort((left, right) => direction * left.icon.name.localeCompare(right.icon.name, "zh-CN", { numeric: true, sensitivity: "base" }));
-  }
+    .filter(({ index }) => !normalizedQuery || searchIndex[index].includes(normalizedQuery));
 
   const displayedIcons = visibleIcons.slice(0, renderLimit);
 
@@ -398,6 +429,7 @@ function addIcon() {
   syncStructuredFields();
   const previousScroll = window.scrollY;
   documentData.icons.unshift({ name: "", url: "" });
+  rebuildSearchIndex();
   sortMode = "manual";
   elements.iconSort.value = sortMode;
   filterQuery = "";
@@ -440,6 +472,9 @@ async function loadDocument({ confirmDiscard = false } = {}) {
     const response = await fetch("/api/icons", { cache: "no-store" });
     if (response.status === 404) {
       documentData = { name: "Emby Icons", description: "", icons: [] };
+      rebuildSearchIndex();
+      sortMode = "manual";
+      elements.iconSort.value = sortMode;
       hasDocument = false;
       currentEtag = null;
       clearConflict();
@@ -456,6 +491,9 @@ async function loadDocument({ confirmDiscard = false } = {}) {
     if (validationError) throw new Error(validationError);
 
     documentData = next;
+    rebuildSearchIndex();
+    sortMode = "manual";
+    elements.iconSort.value = sortMode;
     hasDocument = true;
     currentEtag = response.headers.get("ETag");
     clearConflict();
@@ -570,6 +608,7 @@ elements.iconList.addEventListener("input", (event) => {
   const row = input.closest(".icon-row");
   const index = Number(row.dataset.index);
   documentData.icons[index][input.dataset.field] = input.value;
+  searchIndex[index] = `${documentData.icons[index].name} ${documentData.icons[index].url}`.toLocaleLowerCase();
   if (input.dataset.field === "url") updatePreview(row.querySelector("img"), input.value);
   if (input.dataset.field === "name") row.querySelector("img").alt = `${input.value || "图标"} 预览`;
   setDirty(true);
@@ -584,12 +623,15 @@ elements.iconList.addEventListener("click", (event) => {
     const label = documentData.icons[index].name || `第 ${index + 1} 项`;
     if (!window.confirm(`删除“${label}”吗？`)) return;
     documentData.icons.splice(index, 1);
+    rebuildSearchIndex();
   } else if (button.classList.contains("move-up") && index > 0) {
     if (sortMode !== "manual") return;
     [documentData.icons[index - 1], documentData.icons[index]] = [documentData.icons[index], documentData.icons[index - 1]];
+    rebuildSearchIndex();
   } else if (button.classList.contains("move-down") && index < documentData.icons.length - 1) {
     if (sortMode !== "manual") return;
     [documentData.icons[index + 1], documentData.icons[index]] = [documentData.icons[index], documentData.icons[index + 1]];
+    rebuildSearchIndex();
   } else {
     return;
   }
@@ -611,7 +653,7 @@ elements.formatButton.addEventListener("click", () => {
 elements.searchInput.addEventListener("input", () => {
   filterQuery = elements.searchInput.value;
   renderLimit = 60;
-  renderIconList();
+  scheduleIconListRender();
 });
 
 elements.clearSearch.addEventListener("click", () => {
@@ -625,7 +667,14 @@ elements.clearSearch.addEventListener("click", () => {
 elements.iconSort.addEventListener("change", () => {
   sortMode = elements.iconSort.value;
   renderLimit = 60;
+  const changed = sortDocumentIcons(sortMode);
+  rebuildSearchIndex();
   renderIconList();
+  if (changed) {
+    renderJson();
+    setDirty(true);
+    showToast("排序已应用到 JSON，请保存更改");
+  }
 });
 
 elements.loadMoreButton.addEventListener("click", () => {
