@@ -2,6 +2,7 @@ const elements = {
   addButton: document.querySelector("#add-icon-button"),
   count: document.querySelector("#icon-count"),
   copyButton: document.querySelector("#copy-button"),
+  copyPublicButton: document.querySelector("#copy-public-button"),
   clearSearch: document.querySelector("#clear-search"),
   conflictBanner: document.querySelector("#conflict-banner"),
   conflictClose: document.querySelector("#conflict-close"),
@@ -21,6 +22,8 @@ const elements = {
   importError: document.querySelector("#import-error"),
   importFile: document.querySelector("#import-file"),
   importForm: document.querySelector("#import-form"),
+  remoteFetchButton: document.querySelector("#remote-fetch-button"),
+  remoteUrl: document.querySelector("#remote-url"),
   iconList: document.querySelector("#icon-list"),
   jsonEditor: document.querySelector("#json-editor"),
   jsonMessage: document.querySelector("#json-message"),
@@ -80,16 +83,28 @@ function showToast(message) {
   toastTimer = setTimeout(() => elements.toast.classList.remove("show"), 2600);
 }
 
-function parseDocumentText(raw) {
-  let next;
+function parseImportedIcons(raw) {
+  let value;
   try {
-    next = JSON.parse(raw);
+    value = JSON.parse(raw);
   } catch {
     throw new Error("JSON 格式无效");
   }
-  const validationError = validDocument(next);
-  if (validationError) throw new Error(validationError);
-  return next;
+
+  const icons = Array.isArray(value) ? value : value?.icons;
+  if (!Array.isArray(icons)) throw new Error("导入内容必须包含 icons 数组");
+  return icons.map((icon, index) => {
+    if (!icon || typeof icon !== "object" || Array.isArray(icon)) throw new Error(`icons[${index}] 必须是对象`);
+    if (typeof icon.name !== "string" || !icon.name.trim()) throw new Error(`第 ${index + 1} 项缺少名称`);
+    if (typeof icon.url !== "string" || !icon.url.trim()) throw new Error(`第 ${index + 1} 项缺少图片地址`);
+    try {
+      const url = new URL(icon.url);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+    } catch {
+      throw new Error(`第 ${index + 1} 项图片地址无效`);
+    }
+    return { ...icon, name: icon.name.trim(), url: icon.url.trim() };
+  });
 }
 
 function getSerializedDocument() {
@@ -108,6 +123,7 @@ function openImportDialog() {
   elements.importError.textContent = "";
   elements.importFile.value = "";
   elements.importEditor.value = "";
+  elements.remoteUrl.value = "";
   elements.importDialog.showModal();
   elements.importFile.focus();
 }
@@ -121,18 +137,65 @@ async function importDocument(event) {
       ? await elements.importFile.files[0].text()
       : elements.importEditor.value.trim();
     if (!raw) throw new Error("请选择 JSON 文件或粘贴 JSON 内容");
-    const next = parseDocumentText(raw);
-    if (dirty && !window.confirm("导入会覆盖当前未保存的修改，继续吗？")) return;
+    const importedIcons = parseImportedIcons(raw);
+    if (activeTab === "json" && !syncFromJson()) throw new Error("请先修正当前 JSON 错误");
+    if (activeTab !== "json") syncStructuredFields();
 
-    documentData = next;
+    const existingNames = new Set(documentData.icons.map((icon) => icon.name.trim().toLocaleLowerCase()));
+    const additions = [];
+    let skipped = 0;
+    for (const icon of importedIcons) {
+      const key = icon.name.toLocaleLowerCase();
+      if (existingNames.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      existingNames.add(key);
+      additions.push(icon);
+    }
+
+    if (!additions.length) {
+      elements.importDialog.close();
+      showToast(`没有新增图标，已跳过 ${skipped} 个重复名称`);
+      return;
+    }
+
+    documentData.icons.push(...additions);
+    documentData.name = documentData.name.trim() || "Emby Icons";
     hasDocument = true;
     renderStructured();
     renderJson();
     setDirty(true);
     elements.importDialog.close();
+    showToast(`已追加 ${additions.length} 个图标，跳过 ${skipped} 个重复名称`);
     await saveDocument();
   } catch (error) {
     elements.importError.textContent = error.message;
+  }
+}
+
+async function fetchRemoteJson() {
+  const remoteUrl = elements.remoteUrl.value.trim();
+  if (!/^https?:\/\//i.test(remoteUrl)) {
+    elements.importError.textContent = "请输入 HTTP 或 HTTPS 远程地址";
+    return;
+  }
+
+  elements.remoteFetchButton.disabled = true;
+  elements.remoteFetchButton.textContent = "获取中...";
+  elements.importError.textContent = "";
+  try {
+    const response = await fetch(remoteUrl, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`远程请求失败 (${response.status})`);
+    const icons = parseImportedIcons(await response.text());
+    elements.importEditor.value = `${JSON.stringify({ icons }, null, 2)}\n`;
+    elements.importFile.value = "";
+    showToast(`已获取 ${icons.length} 个远程图标，请点击导入并保存`);
+  } catch (error) {
+    elements.importError.textContent = `${error.message}。远程站点需要允许浏览器跨域访问。`;
+  } finally {
+    elements.remoteFetchButton.disabled = false;
+    elements.remoteFetchButton.textContent = "获取远程 JSON";
   }
 }
 
@@ -161,10 +224,22 @@ async function copyDocument() {
   }
 }
 
+async function copyPublicConfig() {
+  try {
+    const response = await fetch("/emby-icons.json", { cache: "no-store" });
+    const raw = await response.text();
+    if (!response.ok) throw new Error("公开配置暂不可用，请先保存 KV 数据");
+    await navigator.clipboard.writeText(raw);
+    showToast("公开配置已复制到剪贴板");
+  } catch (error) {
+    showToast(error.message || "复制失败，请检查浏览器权限");
+  }
+}
+
 function setConnection(message, state = "online") {
   elements.statusText.textContent = message;
   elements.statusDot.className = `status-dot ${state}`;
-  elements.overviewSource.textContent = state === "error" ? "需处理" : message.includes("KV") ? "KV" : "仓库";
+  elements.overviewSource.textContent = state === "error" ? "需处理" : state === "warning" ? "待导入" : "KV";
 }
 
 function updateSaveAvailability() {
@@ -232,13 +307,21 @@ function syncFromJson() {
 }
 
 function updatePreview(image, url) {
+  const preview = image.closest(".icon-preview");
   image.hidden = !url;
   image.src = url || "";
+  if (url) preview.href = url;
+  else preview.removeAttribute("href");
+  preview.tabIndex = url ? 0 : -1;
+  preview.classList.toggle("is-empty", !url);
+  preview.classList.remove("is-broken", "has-image");
   image.onerror = () => {
     image.hidden = true;
+    preview.classList.add("is-broken");
   };
   image.onload = () => {
     image.hidden = false;
+    preview.classList.add("has-image");
   };
 }
 
@@ -263,12 +346,14 @@ function renderIconList() {
     const nameInput = row.querySelector('[data-field="name"]');
     const urlInput = row.querySelector('[data-field="url"]');
     const image = row.querySelector("img");
+    const preview = row.querySelector(".icon-preview");
 
     row.dataset.index = String(index);
     row.querySelector(".row-index").textContent = String(index + 1).padStart(2, "0");
     nameInput.value = icon.name;
     urlInput.value = icon.url;
     image.alt = icon.name ? `${icon.name} 预览` : "图标预览";
+    preview.setAttribute("aria-label", `在新窗口打开 ${icon.name || "图标"} 预览`);
     updatePreview(image, icon.url);
     row.querySelector(".move-up").disabled = index === 0;
     row.querySelector(".move-down").disabled = index === documentData.icons.length - 1;
@@ -328,7 +413,7 @@ async function loadDocument({ confirmDiscard = false } = {}) {
   try {
     const response = await fetch("/api/icons", { cache: "no-store" });
     if (response.status === 404) {
-      documentData = { name: "", description: "", icons: [] };
+      documentData = { name: "Emby Icons", description: "", icons: [] };
       hasDocument = false;
       currentEtag = null;
       clearConflict();
@@ -509,6 +594,8 @@ elements.importButton.addEventListener("click", openImportDialog);
 elements.emptyImportButton.addEventListener("click", openImportDialog);
 elements.exportButton.addEventListener("click", exportDocument);
 elements.copyButton.addEventListener("click", copyDocument);
+elements.copyPublicButton.addEventListener("click", copyPublicConfig);
+elements.remoteFetchButton.addEventListener("click", fetchRemoteJson);
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictClose.addEventListener("click", dismissConflict);

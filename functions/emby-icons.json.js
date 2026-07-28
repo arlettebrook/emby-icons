@@ -1,7 +1,7 @@
 import { handleGet, handleOptions } from "./_shared/icons.js";
 
 export function onRequestGet({ request, env }) {
-  return handleGet(request, env, "public, max-age=60, stale-while-revalidate=300");
+  return handleGet(request, env, "no-cache");
 }
 
 export function onRequestOptions() {

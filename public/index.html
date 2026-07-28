@@ -19,6 +19,7 @@
         </div>
         <div class="header-actions">
           <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
+          <button class="button button-secondary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制公开配置</button>
           <button class="button button-secondary" id="export-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>导出 JSON</button>
           <button class="button button-secondary" id="reload-button" type="button"><span class="button-icon" aria-hidden="true">↻</span>重新加载</button>
           <button class="button button-primary" id="save-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>保存更改</button>
@@ -120,7 +121,7 @@
     <template id="icon-row-template">
       <article class="icon-row">
         <div class="row-index" aria-hidden="true"></div>
-        <div class="icon-preview"><img alt="" /></div>
+        <a class="icon-preview" target="_blank" rel="noreferrer" aria-label="打开图片预览" tabindex="-1"><img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" /></a>
         <label class="field compact-field">
           <span>图标名称</span>
           <input type="text" data-field="name" autocomplete="off" />
@@ -143,7 +144,14 @@
           <h2>导入图标 JSON</h2>
           <button class="icon-button" value="cancel" formmethod="dialog" aria-label="关闭" title="关闭">×</button>
         </div>
-        <p class="dialog-lead">选择 JSON 文件，或将 JSON 粘贴到下方。导入会直接保存到 Cloudflare KV，需要管理员令牌。</p>
+        <p class="dialog-lead">导入只会追加 icons，name 和 description 会保留当前配置。重复名称会自动跳过，保存到 Cloudflare KV 需要管理员令牌。</p>
+        <div class="remote-import-row">
+          <label class="field">
+            <span>远程 JSON 地址</span>
+            <input id="remote-url" type="url" inputmode="url" placeholder="https://example.com/emby-icons.json" autocomplete="off" />
+          </label>
+          <button class="button button-secondary remote-fetch-button" id="remote-fetch-button" type="button">获取远程 JSON</button>
+        </div>
         <label class="field import-file-field">
           <span>JSON 文件</span>
           <input id="import-file" type="file" accept=".json,application/json" />

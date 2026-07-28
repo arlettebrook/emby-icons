@@ -93,4 +93,4 @@ npm test
 - <https://raw.githubusercontent.com/arlettebrook/emby-icons/refs/heads/main/emby-icons.json>
 - <https://s.nek.loc.cc/emby-icons>
 
-管理面板支持 JSON 文件导入、JSON 导出、复制 JSON 和粘贴导入。导入写入 KV 前需要管理员令牌。
+管理面板支持 JSON 文件导入、远程 URL 导入、JSON 导出、复制 JSON 和粘贴导入。所有导入只追加 `icons`，不会覆盖当前的 `name` 和 `description`；导入会按照 `name` 去重。导入写入 KV 前需要管理员令牌。公开配置复制按钮会复制 `/emby-icons.json` 当前内容。

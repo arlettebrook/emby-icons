@@ -1281,3 +1281,66 @@ dialog .field input {
     width: 100%;
   }
 }
+
+.remote-import-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.remote-fetch-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+#import-dialog {
+  width: min(580px, calc(100% - 32px));
+}
+
+.icon-preview {
+  position: relative;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.icon-preview:hover,
+.icon-preview:focus-visible {
+  border-color: var(--accent);
+  background: #f5fbfa;
+  box-shadow: 0 5px 14px rgb(11 143 131 / 14%);
+}
+
+.icon-preview img {
+  padding: 8px;
+  object-fit: contain;
+}
+
+.icon-preview.is-empty::before {
+  content: "添加图片";
+}
+
+.icon-preview.is-broken::before {
+  content: "预览失败";
+  color: var(--coral);
+}
+
+.icon-preview.has-image::before {
+  display: none;
+}
+
+.icon-preview.is-broken {
+  background: #fff7f6;
+}
+
+@media (max-width: 560px) {
+  .remote-import-row {
+    grid-template-columns: 1fr;
+  }
+
+  .remote-fetch-button {
+    width: 100%;
+  }
+}
