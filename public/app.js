@@ -453,7 +453,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     showToast("当前没有待保存的修改");
     return;
   }
-  if (conflictActive) {
+  if (conflictActive && !force) {
     showToast("请先重新加载云端版本，再保存修改");
     return;
   }
@@ -487,7 +487,9 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
-    if (currentEtag) headers["If-Match"] = currentEtag;
+    // Cloudflare KV is eventually consistent across edge locations. A client ETag
+    // can legitimately differ from the node handling this write, so normal saves
+    // use last-write-wins. Strict If-Match remains available to API clients.
     if (force) headers["X-Force-Overwrite"] = "true";
 
     const response = await fetch("/api/icons", {

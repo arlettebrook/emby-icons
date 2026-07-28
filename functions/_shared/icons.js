@@ -72,7 +72,7 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
         {
           status: 404,
           headers: {
-            "Cache-Control": "no-store",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
             "X-Emby-Icons-Source": source,
           },
         },
@@ -82,7 +82,7 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
     return new Response(text, {
       headers: {
         ...corsHeaders,
-        "Cache-Control": cacheControl,
+        "Cache-Control": cacheControl === "no-cache" ? "no-store, no-cache, must-revalidate" : cacheControl,
         "Content-Type": "application/json; charset=utf-8",
         ETag: etag,
         "X-Emby-Icons-Source": source,
