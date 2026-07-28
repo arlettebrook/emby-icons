@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build.js",
     "dev": "wrangler pages dev public --kv EMBY_ICONS --persist-to .wrangler/state",
-    "deploy": "wrangler pages deploy public --project-name emby-icons",
     "test": "node --test"
   },
   "devDependencies": {

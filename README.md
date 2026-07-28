@@ -14,44 +14,59 @@ npm run dev
 
 将 `.dev.vars` 中的 `ADMIN_TOKEN` 换成一个足够长的随机字符串。本地页面通常位于 `http://localhost:8788`，本地 KV 数据保存在 `.wrangler/state`。
 
-## Cloudflare Pages 部署
+## 通过 GitHub 部署到 Cloudflare Pages
 
-### 1. 创建 Pages 项目
+### 1. 将代码推送到 GitHub
 
-在 Cloudflare Dashboard 中连接此 GitHub 仓库，并使用以下构建配置：
-
-- 构建命令：留空
-- 构建输出目录：`public`
-- Root directory：留空
-
-也可以通过 Wrangler 首次部署：
+当前开发分支是 `master`。提交代码并推送到 GitHub：
 
 ```powershell
-npx wrangler login
-npx wrangler pages project create emby-icons
-npm run deploy
+git add README.md .dev.vars.example .gitignore functions package.json package-lock.json public scripts test wrangler.jsonc
+git commit -m "Add Cloudflare Pages icon manager"
+git push origin master
 ```
 
-### 2. 创建并绑定 KV
+不要提交 `.dev.vars`，它只用于本地开发并已被 `.gitignore` 排除。
 
-```powershell
-npx wrangler kv namespace create EMBY_ICONS
-```
+### 2. 连接 GitHub 仓库
 
-然后进入 Cloudflare Dashboard：
+1. 登录 Cloudflare Dashboard。
+2. 打开 **Workers & Pages**，选择 **Create application > Pages > Connect to Git**。
+3. 授权 GitHub，并选择 `arlettebrook/emby-icons`。
+4. Production branch 选择 `master`。
+5. 使用以下构建配置：
 
-1. 打开 **Workers & Pages > emby-icons > Settings > Bindings**。
-2. 添加 **KV namespace binding**。
-3. 变量名填写 `EMBY_ICONS`，命名空间选择刚创建的 KV。
+| 配置项 | 值 |
+| --- | --- |
+| Framework preset | `None` |
+| Build command | `npm run build` |
+| Build output directory | `public` |
+| Root directory | 留空 |
+
+点击 **Save and Deploy**。仓库根目录的 `functions/` 会由 Cloudflare 自动识别为 Pages Functions，以后每次推送到 `master` 都会自动部署。
+
+### 3. 创建并绑定 KV
+
+首次部署完成后，在 Cloudflare Dashboard 创建一个 KV namespace，例如 `emby-icons-data`。
+
+进入 **Workers & Pages > 你的 Pages 项目 > Settings > Bindings**：
+
+1. 添加 **KV namespace binding**。
+2. Variable name 必须填写 `EMBY_ICONS`。
+3. KV namespace 选择刚创建的 `emby-icons-data`。
 4. Production 和 Preview 环境都需要绑定。
 
-### 3. 设置管理员令牌
+### 4. 设置管理员令牌
 
-```powershell
-npx wrangler pages secret put ADMIN_TOKEN --project-name emby-icons
-```
+进入 Pages 项目的 **Settings > Variables and Secrets**，添加：
 
-设置完成后重新部署。管理员令牌只保存在 Cloudflare Secret 和浏览器当前会话的 `sessionStorage` 中，不会写入仓库。
+- 类型：Secret
+- Variable name：`ADMIN_TOKEN`
+- Value：一个足够长且随机的管理员密码
+
+同样建议为 Production 和 Preview 分别设置。保存绑定和 Secret 后，在 **Deployments** 页面点击 **Retry deployment**，或向 `master` 再推送一次提交。
+
+管理员令牌只保存在 Cloudflare Secret 和浏览器当前会话的 `sessionStorage` 中，不会写入仓库。
 
 ## 地址
 
@@ -60,6 +75,8 @@ npx wrangler pages secret put ADMIN_TOKEN --project-name emby-icons
 - 管理 API：`GET/PUT https://<你的域名>/api/icons`
 
 KV 为空时，读取接口会返回仓库中的 `public/emby-icons.seed.json`。在管理面板首次保存后，后续读取会使用 KV 中的版本。
+
+注意：在线管理面板保存的是 Cloudflare KV，不会反向修改 GitHub 仓库中的根目录 `emby-icons.json`。
 
 ## 测试
 
