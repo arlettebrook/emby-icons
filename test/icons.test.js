@@ -116,6 +116,40 @@ test("PUT rejects stale ETags when the KV document changed", async () => {
   assert.match((await response.json()).error, /changed/);
 });
 
+test("PUT allows an authenticated force overwrite after a stale ETag", async () => {
+  const env = createEnvironment();
+  const first = new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
+    body: JSON.stringify(seed),
+  });
+  await handlePut(first, env);
+  const initial = await handleGet(new Request("https://example.com/api/icons"), env);
+  const staleEtag = initial.headers.get("ETag");
+
+  const newer = { ...seed, description: "Remote update" };
+  await handlePut(new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: { Authorization: "Bearer secret-token", "Content-Type": "application/json" },
+    body: JSON.stringify(newer),
+  }), env);
+
+  const overwrite = { ...seed, description: "My update" };
+  const response = await handlePut(new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+      "If-Match": staleEtag,
+      "X-Force-Overwrite": "true",
+    },
+    body: JSON.stringify(overwrite),
+  }), env);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await (await handleGet(new Request("https://example.com/api/icons"), env)).json(), overwrite);
+});
+
 test("PUT rejects invalid icon URLs", async () => {
   const env = createEnvironment();
   const invalid = { ...seed, icons: [{ name: "Bad", url: "javascript:alert(1)" }] };

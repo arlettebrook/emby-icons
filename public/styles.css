@@ -251,6 +251,15 @@ h1 {
   background: #fff4e6;
 }
 
+.button-conflict-force {
+  border-color: #d99d68;
+  background: #fff4e6;
+}
+
+.button-conflict-force:hover:not(:disabled) {
+  background: #ffe8cf;
+}
+
 .conflict-close {
   width: 28px;
   height: 28px;
@@ -701,6 +710,10 @@ dialog form {
   }
 
   .button-conflict {
+    margin-left: 40px;
+  }
+
+  .button-conflict-force {
     margin-left: 40px;
   }
 

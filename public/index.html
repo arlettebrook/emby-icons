@@ -39,10 +39,11 @@
       <section class="conflict-banner" id="conflict-banner" role="alert" hidden>
         <span class="conflict-icon" aria-hidden="true">!</span>
         <div class="conflict-copy">
-          <strong>云端内容已被其他会话更新，无法保存到 KV</strong>
-          <span>请重新加载最新版本，再继续编辑和保存。</span>
+          <strong>检测到云端内容已更新</strong>
+          <span>重新加载可保留云端版本，覆盖保存可保留当前编辑内容。</span>
         </div>
         <button class="button button-conflict" id="conflict-reload" type="button">重新加载云端版本</button>
+        <button class="button button-conflict button-conflict-force" id="conflict-force" type="button">覆盖云端并保存</button>
           <button class="conflict-close" id="conflict-close" type="button" aria-label="稍后处理" title="稍后处理">×</button>
       </section>
 

@@ -6,6 +6,7 @@ const elements = {
   clearSearch: document.querySelector("#clear-search"),
   conflictBanner: document.querySelector("#conflict-banner"),
   conflictClose: document.querySelector("#conflict-close"),
+  conflictForce: document.querySelector("#conflict-force"),
   conflictReload: document.querySelector("#conflict-reload"),
   description: document.querySelector("#document-description"),
   dirtyState: document.querySelector("#document-state"),
@@ -55,6 +56,7 @@ let toastTimer;
 let filterQuery = "";
 let conflictActive = false;
 let hasDocument = false;
+let forceSaveRequested = false;
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 
@@ -445,7 +447,7 @@ async function loadDocument({ confirmDiscard = false } = {}) {
   }
 }
 
-async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token")) {
+async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token"), force = false) {
   if (saving) return;
   if (!dirty) {
     showToast("当前没有待保存的修改");
@@ -471,6 +473,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
   }
 
   if (!token) {
+    forceSaveRequested = force;
     elements.tokenError.textContent = "";
     elements.tokenInput.value = "";
     elements.tokenDialog.showModal();
@@ -485,6 +488,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
       "Content-Type": "application/json",
     };
     if (currentEtag) headers["If-Match"] = currentEtag;
+    if (force) headers["X-Force-Overwrite"] = "true";
 
     const response = await fetch("/api/icons", {
       method: "PUT",
@@ -600,6 +604,10 @@ elements.copyPublicButton.addEventListener("click", copyPublicConfig);
 elements.remoteFetchButton.addEventListener("click", fetchRemoteJson);
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
+elements.conflictForce.addEventListener("click", () => {
+  if (!window.confirm("确定使用当前编辑内容覆盖云端版本吗？此操作会覆盖其他会话的修改。")) return;
+  saveDocument(sessionStorage.getItem("emby-icons-admin-token"), true);
+});
 elements.conflictClose.addEventListener("click", dismissConflict);
 elements.saveButton.addEventListener("click", () => saveDocument());
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
@@ -615,7 +623,15 @@ elements.toggleToken.addEventListener("click", () => {
 elements.tokenForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const token = elements.tokenInput.value.trim();
-  if (token) saveDocument(token);
+  if (token) {
+    const force = forceSaveRequested;
+    forceSaveRequested = false;
+    saveDocument(token, force);
+  }
+});
+
+elements.tokenDialog.addEventListener("close", () => {
+  if (!saving) forceSaveRequested = false;
 });
 
 elements.importForm.addEventListener("submit", (event) => {

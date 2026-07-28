@@ -4,7 +4,7 @@ const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match, X-Force-Overwrite",
 };
 
 function jsonResponse(body, init = {}) {
@@ -118,7 +118,8 @@ export async function handlePut(request, env) {
 
   const current = await readDocument(env);
   const expectedEtag = request.headers.get("If-Match");
-  if (expectedEtag && expectedEtag !== "*" && expectedEtag !== current.etag) {
+  const forceOverwrite = request.headers.get("X-Force-Overwrite") === "true";
+  if (!forceOverwrite && expectedEtag && expectedEtag !== "*" && expectedEtag !== current.etag) {
     return jsonResponse(
       { error: "Cloud document changed. Reload it before saving again." },
       { status: 412, headers: current.etag ? { ETag: current.etag } : {} },
