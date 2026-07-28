@@ -926,6 +926,32 @@ body {
   gap: 10px;
 }
 
+.sort-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sort-field select {
+  height: 40px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  outline: none;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.sort-field select:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgb(38 135 162 / 12%);
+}
+
 .search-field {
   width: min(250px, 30vw);
   height: 40px;
@@ -991,6 +1017,7 @@ body {
 
 .icon-list {
   gap: 12px;
+  contain: layout style;
 }
 
 .icon-row {
@@ -1002,6 +1029,13 @@ body {
   border-radius: 12px;
   box-shadow: 0 5px 16px rgb(21 44 56 / 3%);
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 104px;
+}
+
+.load-more-button {
+  width: 100%;
+  margin-top: 16px;
 }
 
 .icon-row:hover {
@@ -1198,11 +1232,21 @@ dialog {
 
   .list-tools {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .search-field {
     flex: 1;
     width: auto;
+  }
+
+  .sort-field {
+    flex: 1 0 100%;
+    justify-content: space-between;
+  }
+
+  .sort-field select {
+    flex: 1;
   }
 
   .icon-row {

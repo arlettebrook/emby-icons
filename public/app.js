@@ -25,6 +25,8 @@ const elements = {
   importError: document.querySelector("#import-error"),
   importFile: document.querySelector("#import-file"),
   importForm: document.querySelector("#import-form"),
+  iconSort: document.querySelector("#icon-sort"),
+  loadMoreButton: document.querySelector("#load-more-button"),
   remoteFetchButton: document.querySelector("#remote-fetch-button"),
   remoteUrl: document.querySelector("#remote-url"),
   iconList: document.querySelector("#icon-list"),
@@ -40,6 +42,8 @@ const elements = {
   overviewCount: document.querySelector("#overview-count"),
   overviewSource: document.querySelector("#overview-source"),
   tokenDialog: document.querySelector("#token-dialog"),
+  tokenCancelButton: document.querySelector("#token-cancel-button"),
+  tokenCloseButton: document.querySelector("#token-close-button"),
   tokenError: document.querySelector("#token-error"),
   tokenForm: document.querySelector("#token-form"),
   tokenInput: document.querySelector("#admin-token"),
@@ -57,6 +61,8 @@ let filterQuery = "";
 let conflictActive = false;
 let hasDocument = false;
 let forceSaveRequested = false;
+let sortMode = "manual";
+let renderLimit = 60;
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 
@@ -334,16 +340,24 @@ function renderIconList() {
     .map((icon, index) => ({ icon, index }))
     .filter(({ icon }) => !normalizedQuery || `${icon.name} ${icon.url}`.toLocaleLowerCase().includes(normalizedQuery));
 
-  elements.count.textContent = normalizedQuery
-    ? `${visibleIcons.length} / ${documentData.icons.length} 项`
-    : `${documentData.icons.length} 项`;
+  if (sortMode === "name-asc" || sortMode === "name-desc") {
+    const direction = sortMode === "name-asc" ? 1 : -1;
+    visibleIcons.sort((left, right) => direction * left.icon.name.localeCompare(right.icon.name, "zh-CN", { numeric: true, sensitivity: "base" }));
+  }
+
+  const displayedIcons = visibleIcons.slice(0, renderLimit);
+
+  elements.count.textContent = normalizedQuery || displayedIcons.length < visibleIcons.length
+    ? `${displayedIcons.length} / ${visibleIcons.length} 项`
+    : `${visibleIcons.length} 项`;
   elements.overviewCount.textContent = String(documentData.icons.length);
   elements.emptyState.hidden = visibleIcons.length > 0;
   elements.emptyTitle.textContent = normalizedQuery ? "没有匹配结果" : "暂无图标";
   elements.emptyCopy.textContent = normalizedQuery ? "换一个关键词，或清除搜索条件。" : "添加你的第一个图标开始吧。";
   elements.emptyAddButton.hidden = Boolean(normalizedQuery);
 
-  visibleIcons.forEach(({ icon, index }) => {
+  const fragment = document.createDocumentFragment();
+  displayedIcons.forEach(({ icon, index }) => {
     const row = elements.rowTemplate.content.firstElementChild.cloneNode(true);
     const nameInput = row.querySelector('[data-field="name"]');
     const urlInput = row.querySelector('[data-field="url"]');
@@ -357,10 +371,13 @@ function renderIconList() {
     image.alt = icon.name ? `${icon.name} 预览` : "图标预览";
     preview.setAttribute("aria-label", `在新窗口打开 ${icon.name || "图标"} 预览`);
     updatePreview(image, icon.url);
-    row.querySelector(".move-up").disabled = index === 0;
-    row.querySelector(".move-down").disabled = index === documentData.icons.length - 1;
-    elements.iconList.append(row);
+    row.querySelector(".move-up").disabled = sortMode !== "manual" || index === 0;
+    row.querySelector(".move-down").disabled = sortMode !== "manual" || index === documentData.icons.length - 1;
+    fragment.append(row);
   });
+  elements.iconList.append(fragment);
+  elements.loadMoreButton.hidden = displayedIcons.length >= visibleIcons.length;
+  elements.loadMoreButton.textContent = `加载更多图标（剩余 ${visibleIcons.length - displayedIcons.length} 个）`;
 }
 
 function renderStructured() {
@@ -379,12 +396,19 @@ function renderJson() {
 function addIcon() {
   if (activeTab === "json" && !syncFromJson()) return;
   syncStructuredFields();
-  documentData.icons.push({ name: "", url: "" });
+  const previousScroll = window.scrollY;
+  documentData.icons.unshift({ name: "", url: "" });
+  sortMode = "manual";
+  elements.iconSort.value = sortMode;
   filterQuery = "";
   elements.searchInput.value = "";
+  renderLimit = 60;
   renderStructured();
   setDirty(true);
-  requestAnimationFrame(() => [...elements.iconList.children].find((row) => row.dataset.index === String(documentData.icons.length - 1))?.querySelector('[data-field="name"]')?.focus());
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: previousScroll, behavior: "auto" });
+    elements.iconList.querySelector('[data-index="0"] [data-field="name"]')?.focus({ preventScroll: true });
+  });
 }
 
 function switchTab(nextTab) {
@@ -561,8 +585,10 @@ elements.iconList.addEventListener("click", (event) => {
     if (!window.confirm(`删除“${label}”吗？`)) return;
     documentData.icons.splice(index, 1);
   } else if (button.classList.contains("move-up") && index > 0) {
+    if (sortMode !== "manual") return;
     [documentData.icons[index - 1], documentData.icons[index]] = [documentData.icons[index], documentData.icons[index - 1]];
   } else if (button.classList.contains("move-down") && index < documentData.icons.length - 1) {
+    if (sortMode !== "manual") return;
     [documentData.icons[index + 1], documentData.icons[index]] = [documentData.icons[index], documentData.icons[index + 1]];
   } else {
     return;
@@ -584,14 +610,27 @@ elements.formatButton.addEventListener("click", () => {
 
 elements.searchInput.addEventListener("input", () => {
   filterQuery = elements.searchInput.value;
+  renderLimit = 60;
   renderIconList();
 });
 
 elements.clearSearch.addEventListener("click", () => {
   filterQuery = "";
   elements.searchInput.value = "";
+  renderLimit = 60;
   renderIconList();
   elements.searchInput.focus();
+});
+
+elements.iconSort.addEventListener("change", () => {
+  sortMode = elements.iconSort.value;
+  renderLimit = 60;
+  renderIconList();
+});
+
+elements.loadMoreButton.addEventListener("click", () => {
+  renderLimit += 60;
+  renderIconList();
 });
 
 elements.addButton.addEventListener("click", addIcon);
@@ -621,6 +660,9 @@ elements.toggleToken.addEventListener("click", () => {
   elements.toggleToken.setAttribute("aria-label", visible ? "显示令牌" : "隐藏令牌");
   elements.toggleToken.setAttribute("title", visible ? "显示令牌" : "隐藏令牌");
 });
+
+elements.tokenCancelButton.addEventListener("click", () => elements.tokenDialog.close("cancel"));
+elements.tokenCloseButton.addEventListener("click", () => elements.tokenDialog.close("cancel"));
 
 elements.tokenForm.addEventListener("submit", (event) => {
   event.preventDefault();
