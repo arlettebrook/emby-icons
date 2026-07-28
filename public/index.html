@@ -41,7 +41,7 @@
           <span>请重新加载最新版本，再继续编辑和保存。</span>
         </div>
         <button class="button button-conflict" id="conflict-reload" type="button">重新加载云端版本</button>
-        <button class="conflict-close" id="conflict-close" type="button" aria-label="关闭提示" title="关闭提示">×</button>
+          <button class="conflict-close" id="conflict-close" type="button" aria-label="稍后处理" title="稍后处理">×</button>
       </section>
 
       <div class="workspace">
@@ -139,20 +139,23 @@
         <p class="dialog-lead" id="token-help">输入 Cloudflare 中配置的 <code>ADMIN_TOKEN</code>，仅用于本次保存请求。</p>
         <label class="field">
           <span>API 访问令牌</span>
-          <input
-            id="admin-token"
-            type="text"
-            inputmode="text"
-            autocapitalize="off"
-            autocorrect="off"
-            spellcheck="false"
-            autocomplete="off"
-            data-1p-ignore="true"
-            data-bwignore="true"
-            data-lpignore="true"
-            aria-describedby="token-help"
-            required
-          />
+          <span class="secret-input">
+            <input
+              id="admin-token"
+              type="password"
+              inputmode="text"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              autocomplete="off"
+              data-1p-ignore="true"
+              data-bwignore="true"
+              data-lpignore="true"
+              aria-describedby="token-help"
+              required
+            />
+            <button class="secret-toggle" id="toggle-token" type="button" aria-label="显示令牌" title="显示令牌">显示</button>
+          </span>
         </label>
         <p class="dialog-error" id="token-error"></p>
         <div class="dialog-actions">

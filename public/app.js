@@ -29,6 +29,7 @@ const elements = {
   tokenForm: document.querySelector("#token-form"),
   tokenInput: document.querySelector("#admin-token"),
   toast: document.querySelector("#toast"),
+  toggleToken: document.querySelector("#toggle-token"),
 };
 
 let documentData = { name: "Emby Icons", description: "", icons: [] };
@@ -45,12 +46,20 @@ const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span
 function showConflict() {
   conflictActive = true;
   elements.conflictBanner.hidden = false;
+  if (elements.tokenDialog.open) elements.tokenDialog.close();
+  elements.tokenError.textContent = "";
+  elements.tokenInput.value = "";
   setConnection("云端版本较新，无法保存到 KV", "error");
   setDirty(true);
 }
 
-function hideConflict() {
+function clearConflict() {
   conflictActive = false;
+  elements.conflictBanner.hidden = true;
+  updateSaveAvailability();
+}
+
+function dismissConflict() {
   elements.conflictBanner.hidden = true;
 }
 
@@ -64,19 +73,24 @@ function showToast(message) {
 function setConnection(message, state = "online") {
   elements.statusText.textContent = message;
   elements.statusDot.className = `status-dot ${state}`;
-  elements.overviewSource.textContent = state === "error" ? "错误" : message.includes("KV") ? "KV" : "仓库";
+  elements.overviewSource.textContent = state === "error" ? "需处理" : message.includes("KV") ? "KV" : "仓库";
+}
+
+function updateSaveAvailability() {
+  elements.saveButton.disabled = saving || !dirty || conflictActive;
 }
 
 function setDirty(value) {
   dirty = value;
   elements.dirtyState.textContent = value ? "有未保存修改" : "已同步";
   elements.dirtyState.classList.toggle("dirty", value);
+  updateSaveAvailability();
 }
 
 function setBusy(value) {
   saving = value;
-  elements.saveButton.disabled = value;
   elements.reloadButton.disabled = value;
+  updateSaveAvailability();
   elements.saveButton.innerHTML = value
     ? '<span class="button-icon" aria-hidden="true">…</span>正在保存...'
     : defaultSaveLabel;
@@ -229,7 +243,7 @@ async function loadDocument({ confirmDiscard = false } = {}) {
 
     documentData = next;
     currentEtag = response.headers.get("ETag");
-    hideConflict();
+    clearConflict();
     renderStructured();
     renderJson();
     setDirty(false);
@@ -244,6 +258,10 @@ async function loadDocument({ confirmDiscard = false } = {}) {
 
 async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token")) {
   if (saving) return;
+  if (!dirty) {
+    showToast("当前没有待保存的修改");
+    return;
+  }
   if (conflictActive) {
     showToast("请先重新加载云端版本，再保存修改");
     return;
@@ -296,7 +314,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     }
     if (response.status === 412) {
       showConflict();
-      showToast("云端内容已被其他会话更新，无法保存到 KV");
+      showToast("云端内容已更新，请重新加载后再保存");
       return;
     }
     if (!response.ok) throw new Error(result.error || `保存失败 (${response.status})`);
@@ -305,7 +323,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     currentEtag = response.headers.get("ETag");
     renderJson();
     setDirty(false);
-    hideConflict();
+    clearConflict();
     setConnection("已连接 Cloudflare KV");
     if (elements.tokenDialog.open) elements.tokenDialog.close();
     showToast(`已保存 ${result.count} 个图标`);
@@ -384,9 +402,17 @@ elements.addButton.addEventListener("click", addIcon);
 elements.emptyAddButton.addEventListener("click", addIcon);
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
-elements.conflictClose.addEventListener("click", hideConflict);
+elements.conflictClose.addEventListener("click", dismissConflict);
 elements.saveButton.addEventListener("click", () => saveDocument());
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
+
+elements.toggleToken.addEventListener("click", () => {
+  const visible = elements.tokenInput.type === "text";
+  elements.tokenInput.type = visible ? "password" : "text";
+  elements.toggleToken.textContent = visible ? "显示" : "隐藏";
+  elements.toggleToken.setAttribute("aria-label", visible ? "显示令牌" : "隐藏令牌");
+  elements.toggleToken.setAttribute("title", visible ? "显示令牌" : "隐藏令牌");
+});
 
 elements.tokenForm.addEventListener("submit", (event) => {
   event.preventDefault();

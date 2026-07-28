@@ -1169,3 +1169,71 @@ dialog {
     height: 44px;
   }
 }
+
+/* Safer token entry and clearer recovery states. */
+.secret-input {
+  width: 100%;
+  position: relative;
+  display: block !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+}
+
+.secret-input input {
+  padding-right: 58px;
+}
+
+.secret-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  min-width: 42px;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transform: translateY(-50%);
+}
+
+.secret-toggle:hover {
+  background: var(--accent-soft);
+}
+
+.conflict-banner {
+  border-color: #e4c092;
+  box-shadow: 0 12px 30px rgb(135 91 35 / 10%);
+}
+
+.conflict-banner .button-conflict {
+  font-weight: 750;
+}
+
+dialog {
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgb(21 44 56 / 24%);
+}
+
+dialog form {
+  background: #fff;
+}
+
+dialog .field input {
+  background: #fbfdfd;
+}
+
+@media (max-width: 560px) {
+  .dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr 1.35fr;
+  }
+
+  .dialog-actions .button {
+    width: 100%;
+  }
+}
