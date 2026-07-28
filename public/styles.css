@@ -182,6 +182,90 @@ h1 {
   background: var(--coral);
 }
 
+.conflict-banner {
+  width: min(1180px, calc(100% - 40px));
+  position: relative;
+  min-height: 66px;
+  margin: 16px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #edc4a4;
+  border-radius: 12px;
+  background: #fff8ef;
+  color: #7f4c27;
+  box-shadow: 0 8px 22px rgb(133 87 39 / 8%);
+}
+
+.conflict-banner[hidden] {
+  display: none;
+}
+
+.conflict-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #f6c98a;
+  color: #7f4c27;
+  font-weight: 800;
+}
+
+.conflict-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.conflict-copy strong,
+.conflict-copy span {
+  display: block;
+}
+
+.conflict-copy strong {
+  font-size: 13px;
+}
+
+.conflict-copy span {
+  margin-top: 3px;
+  color: #9a6e4c;
+  font-size: 12px;
+}
+
+.button-conflict {
+  min-height: 34px;
+  border-color: #e5bc96;
+  background: #fff;
+  color: #7f4c27;
+  white-space: nowrap;
+}
+
+.button-conflict:hover:not(:disabled) {
+  border-color: #d99d68;
+  background: #fff4e6;
+}
+
+.conflict-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #a87c5b;
+  cursor: pointer;
+  font-size: 19px;
+}
+
+.conflict-close:hover {
+  background: #fbe9d6;
+  color: #7f4c27;
+}
+
 .document-state {
   margin-left: auto;
   padding: 4px 8px;
@@ -456,6 +540,21 @@ dialog form {
   font-size: 12px;
 }
 
+.dialog-lead {
+  margin: -10px 0 20px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.dialog-lead code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #edf4f2;
+  color: var(--accent-dark);
+  font: 11px "Cascadia Code", Consolas, monospace;
+}
+
 .dialog-actions {
   margin-top: 16px;
   justify-content: flex-end;
@@ -584,6 +683,26 @@ dialog form {
     min-height: 520px;
     padding: 12px;
     font-size: 12px;
+  }
+
+  .conflict-banner {
+    width: calc(100% - 24px);
+    align-items: flex-start;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+
+  .conflict-copy {
+    padding-right: 18px;
+  }
+
+  .button-conflict {
+    margin-left: 40px;
+  }
+
+  .conflict-close {
+    position: absolute;
+    margin-left: calc(100% - 64px);
   }
 }
 

@@ -77,6 +77,36 @@ test("PUT ignores accidental whitespace around the configured secret", async () 
   assert.equal(response.status, 200);
 });
 
+test("PUT rejects stale ETags when the KV document changed", async () => {
+  const env = createEnvironment();
+  const initial = await handleGet(new Request("https://example.com/api/icons"), env);
+  const staleEtag = initial.headers.get("ETag");
+
+  const newer = { ...seed, description: "Updated remotely" };
+  const remoteUpdate = new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(newer),
+  });
+  assert.equal((await handlePut(remoteUpdate, env)).status, 200);
+
+  const staleUpdate = new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+      "If-Match": staleEtag,
+    },
+    body: JSON.stringify(seed),
+  });
+  const response = await handlePut(staleUpdate, env);
+  assert.equal(response.status, 412);
+  assert.match((await response.json()).error, /云端内容已被其他会话更新/);
+});
+
 test("PUT rejects invalid icon URLs", async () => {
   const env = createEnvironment();
   const invalid = { ...seed, icons: [{ name: "Bad", url: "javascript:alert(1)" }] };

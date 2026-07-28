@@ -2,6 +2,9 @@ const elements = {
   addButton: document.querySelector("#add-icon-button"),
   count: document.querySelector("#icon-count"),
   clearSearch: document.querySelector("#clear-search"),
+  conflictBanner: document.querySelector("#conflict-banner"),
+  conflictClose: document.querySelector("#conflict-close"),
+  conflictReload: document.querySelector("#conflict-reload"),
   description: document.querySelector("#document-description"),
   dirtyState: document.querySelector("#document-state"),
   emptyAddButton: document.querySelector("#empty-add-button"),
@@ -35,6 +38,21 @@ let dirty = false;
 let saving = false;
 let toastTimer;
 let filterQuery = "";
+let conflictActive = false;
+
+const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
+
+function showConflict() {
+  conflictActive = true;
+  elements.conflictBanner.hidden = false;
+  setConnection("云端版本较新，无法保存到 KV", "error");
+  setDirty(true);
+}
+
+function hideConflict() {
+  conflictActive = false;
+  elements.conflictBanner.hidden = true;
+}
 
 function showToast(message) {
   elements.toast.textContent = message;
@@ -59,7 +77,9 @@ function setBusy(value) {
   saving = value;
   elements.saveButton.disabled = value;
   elements.reloadButton.disabled = value;
-  elements.saveButton.textContent = value ? "正在保存..." : "保存到 Cloudflare";
+  elements.saveButton.innerHTML = value
+    ? '<span class="button-icon" aria-hidden="true">…</span>正在保存...'
+    : defaultSaveLabel;
 }
 
 function validDocument(value) {
@@ -209,6 +229,7 @@ async function loadDocument({ confirmDiscard = false } = {}) {
 
     documentData = next;
     currentEtag = response.headers.get("ETag");
+    hideConflict();
     renderStructured();
     renderJson();
     setDirty(false);
@@ -223,6 +244,10 @@ async function loadDocument({ confirmDiscard = false } = {}) {
 
 async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token")) {
   if (saving) return;
+  if (conflictActive) {
+    showToast("请先重新加载云端版本，再保存修改");
+    return;
+  }
   if (activeTab === "json") {
     if (!syncFromJson()) {
       showToast("JSON 校验未通过");
@@ -269,12 +294,18 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
       elements.tokenInput.focus();
       return;
     }
+    if (response.status === 412) {
+      showConflict();
+      showToast("云端内容已被其他会话更新，无法保存到 KV");
+      return;
+    }
     if (!response.ok) throw new Error(result.error || `保存失败 (${response.status})`);
 
     sessionStorage.setItem("emby-icons-admin-token", token);
     currentEtag = response.headers.get("ETag");
     renderJson();
     setDirty(false);
+    hideConflict();
     setConnection("已连接 Cloudflare KV");
     if (elements.tokenDialog.open) elements.tokenDialog.close();
     showToast(`已保存 ${result.count} 个图标`);
@@ -352,6 +383,8 @@ elements.clearSearch.addEventListener("click", () => {
 elements.addButton.addEventListener("click", addIcon);
 elements.emptyAddButton.addEventListener("click", addIcon);
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
+elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
+elements.conflictClose.addEventListener("click", hideConflict);
 elements.saveButton.addEventListener("click", () => saveDocument());
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
 

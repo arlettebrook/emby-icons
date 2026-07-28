@@ -34,6 +34,16 @@
         </div>
       </section>
 
+      <section class="conflict-banner" id="conflict-banner" role="alert" hidden>
+        <span class="conflict-icon" aria-hidden="true">!</span>
+        <div class="conflict-copy">
+          <strong>云端内容已被其他会话更新，无法保存到 KV</strong>
+          <span>请重新加载最新版本，再继续编辑和保存。</span>
+        </div>
+        <button class="button button-conflict" id="conflict-reload" type="button">重新加载云端版本</button>
+        <button class="conflict-close" id="conflict-close" type="button" aria-label="关闭提示" title="关闭提示">×</button>
+      </section>
+
       <div class="workspace">
         <section class="workspace-intro">
           <div>
@@ -121,14 +131,28 @@
     </template>
 
     <dialog id="token-dialog">
-      <form method="dialog" id="token-form">
+      <form method="dialog" id="token-form" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
         <div class="dialog-heading">
           <h2>管理员验证</h2>
           <button class="icon-button" value="cancel" formmethod="dialog" aria-label="关闭" title="关闭">×</button>
         </div>
+        <p class="dialog-lead" id="token-help">输入 Cloudflare 中配置的 <code>ADMIN_TOKEN</code>，仅用于本次保存请求。</p>
         <label class="field">
-          <span>管理员令牌</span>
-          <input id="admin-token" type="password" autocomplete="current-password" required />
+          <span>API 访问令牌</span>
+          <input
+            id="admin-token"
+            type="text"
+            inputmode="text"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            autocomplete="off"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-lpignore="true"
+            aria-describedby="token-help"
+            required
+          />
         </label>
         <p class="dialog-error" id="token-error"></p>
         <div class="dialog-actions">
