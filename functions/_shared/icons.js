@@ -15,44 +15,23 @@ function jsonResponse(body, init = {}) {
 }
 
 function validateDocument(document) {
-  if (!document || typeof document !== "object" || Array.isArray(document)) {
-    return "根节点必须是 JSON 对象";
-  }
-
-  if (typeof document.name !== "string" || !document.name.trim()) {
-    return "name 必须是非空字符串";
-  }
-
-  if (typeof document.description !== "string") {
-    return "description 必须是字符串";
-  }
-
-  if (!Array.isArray(document.icons)) {
-    return "icons 必须是数组";
-  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) return "Root must be a JSON object";
+  if (typeof document.name !== "string" || !document.name.trim()) return "name must be a non-empty string";
+  if (typeof document.description !== "string") return "description must be a string";
+  if (!Array.isArray(document.icons)) return "icons must be an array";
 
   for (let index = 0; index < document.icons.length; index += 1) {
     const icon = document.icons[index];
-    if (!icon || typeof icon !== "object" || Array.isArray(icon)) {
-      return `icons[${index}] 必须是对象`;
-    }
-    if (typeof icon.name !== "string" || !icon.name.trim()) {
-      return `icons[${index}].name 必须是非空字符串`;
-    }
-    if (typeof icon.url !== "string" || !icon.url.trim()) {
-      return `icons[${index}].url 必须是非空字符串`;
-    }
-
+    if (!icon || typeof icon !== "object" || Array.isArray(icon)) return `icons[${index}] must be an object`;
+    if (typeof icon.name !== "string" || !icon.name.trim()) return `icons[${index}].name is required`;
+    if (typeof icon.url !== "string" || !icon.url.trim()) return `icons[${index}].url is required`;
     try {
       const url = new URL(icon.url);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        return `icons[${index}].url 仅支持 HTTP 或 HTTPS`;
-      }
+      if (!["http:", "https:"].includes(url.protocol)) return `icons[${index}].url must use HTTP or HTTPS`;
     } catch {
-      return `icons[${index}].url 不是有效网址`;
+      return `icons[${index}].url is not a valid URL`;
     }
   }
-
   return null;
 }
 
@@ -62,26 +41,16 @@ async function createEtag(text) {
   return `"${hash}"`;
 }
 
-async function readSeed(request, env) {
-  const seedUrl = new URL("/emby-icons.seed.json", request.url);
-  const response = await env.ASSETS.fetch(seedUrl);
-  if (!response.ok) {
-    throw new Error("无法读取初始 emby-icons.json");
-  }
-  return response.text();
-}
-
-async function readDocument(request, env) {
-  const stored = env.EMBY_ICONS ? await env.EMBY_ICONS.get(STORAGE_KEY) : null;
-  const text = stored ?? (await readSeed(request, env));
-  return { text, etag: await createEtag(text), source: stored === null ? "seed" : "kv" };
+async function readDocument(env) {
+  if (!env.EMBY_ICONS) throw new Error("EMBY_ICONS KV is not configured");
+  const text = await env.EMBY_ICONS.get(STORAGE_KEY);
+  return { text, etag: text === null ? null : await createEtag(text), source: "kv" };
 }
 
 async function isAuthorized(request, env) {
   const configuredToken = String(env.ADMIN_TOKEN || "").trim();
   const authorization = request.headers.get("Authorization") || "";
   const suppliedToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-
   if (!configuredToken || !suppliedToken) return false;
 
   const encoder = new TextEncoder();
@@ -96,7 +65,20 @@ async function isAuthorized(request, env) {
 
 export async function handleGet(request, env, cacheControl = "no-cache") {
   try {
-    const { text, etag, source } = await readDocument(request, env);
+    const { text, etag, source } = await readDocument(env);
+    if (text === null) {
+      return jsonResponse(
+        { error: "KV has no icon data yet. Import a JSON document to get started." },
+        {
+          status: 404,
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Emby-Icons-Source": source,
+          },
+        },
+      );
+    }
+
     return new Response(text, {
       headers: {
         ...corsHeaders,
@@ -112,56 +94,43 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
 }
 
 export async function handlePut(request, env) {
-  if (!env.ADMIN_TOKEN) {
-    return jsonResponse({ error: "服务端尚未配置 ADMIN_TOKEN" }, { status: 503 });
-  }
-
-  if (!(await isAuthorized(request, env))) {
-    return jsonResponse({ error: "管理员令牌无效" }, { status: 401 });
-  }
-
-  if (!env.EMBY_ICONS) {
-    return jsonResponse({ error: "服务端尚未绑定 EMBY_ICONS KV" }, { status: 503 });
-  }
+  if (!env.ADMIN_TOKEN) return jsonResponse({ error: "ADMIN_TOKEN is not configured" }, { status: 503 });
+  if (!(await isAuthorized(request, env))) return jsonResponse({ error: "Invalid admin token" }, { status: 401 });
+  if (!env.EMBY_ICONS) return jsonResponse({ error: "EMBY_ICONS KV is not configured" }, { status: 503 });
 
   const declaredSize = Number(request.headers.get("Content-Length") || 0);
-  if (declaredSize > MAX_DOCUMENT_BYTES) {
-    return jsonResponse({ error: "JSON 文件不能超过 1 MB" }, { status: 413 });
-  }
+  if (declaredSize > MAX_DOCUMENT_BYTES) return jsonResponse({ error: "JSON must be smaller than 1 MB" }, { status: 413 });
 
   const raw = await request.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_DOCUMENT_BYTES) {
-    return jsonResponse({ error: "JSON 文件不能超过 1 MB" }, { status: 413 });
+    return jsonResponse({ error: "JSON must be smaller than 1 MB" }, { status: 413 });
   }
 
   let document;
   try {
     document = JSON.parse(raw);
   } catch {
-    return jsonResponse({ error: "请求内容不是有效 JSON" }, { status: 400 });
+    return jsonResponse({ error: "Request body is not valid JSON" }, { status: 400 });
   }
 
   const validationError = validateDocument(document);
-  if (validationError) {
-    return jsonResponse({ error: validationError }, { status: 400 });
-  }
+  if (validationError) return jsonResponse({ error: validationError }, { status: 400 });
 
-  const current = await readDocument(request, env);
+  const current = await readDocument(env);
   const expectedEtag = request.headers.get("If-Match");
   if (expectedEtag && expectedEtag !== "*" && expectedEtag !== current.etag) {
     return jsonResponse(
-      { error: "云端内容已被其他会话更新，请重新加载后再保存" },
-      { status: 412, headers: { ETag: current.etag } },
+      { error: "Cloud document changed. Reload it before saving again." },
+      { status: 412, headers: current.etag ? { ETag: current.etag } : {} },
     );
   }
 
   const serialized = `${JSON.stringify(document, null, 2)}\n`;
   await env.EMBY_ICONS.put(STORAGE_KEY, serialized);
   const etag = await createEtag(serialized);
-
   return jsonResponse(
     { ok: true, updatedAt: new Date().toISOString(), count: document.icons.length },
-    { status: 200, headers: { ETag: etag } },
+    { status: 200, headers: { ETag: etag, "X-Emby-Icons-Source": "kv" } },
   );
 }
 

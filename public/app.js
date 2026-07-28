@@ -1,6 +1,7 @@
 const elements = {
   addButton: document.querySelector("#add-icon-button"),
   count: document.querySelector("#icon-count"),
+  copyButton: document.querySelector("#copy-button"),
   clearSearch: document.querySelector("#clear-search"),
   conflictBanner: document.querySelector("#conflict-banner"),
   conflictClose: document.querySelector("#conflict-close"),
@@ -11,7 +12,15 @@ const elements = {
   emptyState: document.querySelector("#empty-state"),
   emptyTitle: document.querySelector("#empty-title"),
   emptyCopy: document.querySelector("#empty-copy"),
+  emptyImportButton: document.querySelector("#empty-import-button"),
+  exportButton: document.querySelector("#export-button"),
   formatButton: document.querySelector("#format-button"),
+  importButton: document.querySelector("#import-button"),
+  importDialog: document.querySelector("#import-dialog"),
+  importEditor: document.querySelector("#import-editor"),
+  importError: document.querySelector("#import-error"),
+  importFile: document.querySelector("#import-file"),
+  importForm: document.querySelector("#import-form"),
   iconList: document.querySelector("#icon-list"),
   jsonEditor: document.querySelector("#json-editor"),
   jsonMessage: document.querySelector("#json-message"),
@@ -40,6 +49,7 @@ let saving = false;
 let toastTimer;
 let filterQuery = "";
 let conflictActive = false;
+let hasDocument = false;
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 
@@ -68,6 +78,87 @@ function showToast(message) {
   elements.toast.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => elements.toast.classList.remove("show"), 2600);
+}
+
+function parseDocumentText(raw) {
+  let next;
+  try {
+    next = JSON.parse(raw);
+  } catch {
+    throw new Error("JSON 格式无效");
+  }
+  const validationError = validDocument(next);
+  if (validationError) throw new Error(validationError);
+  return next;
+}
+
+function getSerializedDocument() {
+  if (!hasDocument) throw new Error("KV 中暂无可导出的数据");
+  if (activeTab === "json") {
+    if (!syncFromJson()) throw new Error("请先修正 JSON 错误");
+  } else {
+    syncStructuredFields();
+  }
+  const validationError = validDocument(documentData);
+  if (validationError) throw new Error(validationError);
+  return `${JSON.stringify(documentData, null, 2)}\n`;
+}
+
+function openImportDialog() {
+  elements.importError.textContent = "";
+  elements.importFile.value = "";
+  elements.importEditor.value = "";
+  elements.importDialog.showModal();
+  elements.importFile.focus();
+}
+
+async function importDocument(event) {
+  event.preventDefault();
+  elements.importError.textContent = "";
+
+  try {
+    const raw = elements.importFile.files[0]
+      ? await elements.importFile.files[0].text()
+      : elements.importEditor.value.trim();
+    if (!raw) throw new Error("请选择 JSON 文件或粘贴 JSON 内容");
+    const next = parseDocumentText(raw);
+    if (dirty && !window.confirm("导入会覆盖当前未保存的修改，继续吗？")) return;
+
+    documentData = next;
+    hasDocument = true;
+    renderStructured();
+    renderJson();
+    setDirty(true);
+    elements.importDialog.close();
+    await saveDocument();
+  } catch (error) {
+    elements.importError.textContent = error.message;
+  }
+}
+
+function exportDocument() {
+  try {
+    const serialized = getSerializedDocument();
+    const blob = new Blob([serialized], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "emby-icons.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("JSON 文件已导出");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function copyDocument() {
+  try {
+    await navigator.clipboard.writeText(getSerializedDocument());
+    showToast("JSON 已复制到剪贴板");
+  } catch (error) {
+    showToast(error.message || "复制失败，请检查浏览器权限");
+  }
 }
 
 function setConnection(message, state = "online") {
@@ -236,18 +327,31 @@ async function loadDocument({ confirmDiscard = false } = {}) {
   elements.reloadButton.disabled = true;
   try {
     const response = await fetch("/api/icons", { cache: "no-store" });
+    if (response.status === 404) {
+      documentData = { name: "", description: "", icons: [] };
+      hasDocument = false;
+      currentEtag = null;
+      clearConflict();
+      renderStructured();
+      renderJson();
+      setDirty(false);
+      setConnection("KV 中暂无数据，请导入 JSON", "warning");
+      showToast("KV 中暂无数据，请导入 JSON");
+      return;
+    }
     if (!response.ok) throw new Error(`加载失败 (${response.status})`);
     const next = await response.json();
     const validationError = validDocument(next);
     if (validationError) throw new Error(validationError);
 
     documentData = next;
+    hasDocument = true;
     currentEtag = response.headers.get("ETag");
     clearConflict();
     renderStructured();
     renderJson();
     setDirty(false);
-    setConnection(response.headers.get("X-Emby-Icons-Source") === "kv" ? "已连接 Cloudflare KV" : "已载入仓库初始数据");
+    setConnection("已连接 Cloudflare KV");
   } catch (error) {
     setConnection(error.message, "error");
     showToast(error.message);
@@ -320,6 +424,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     if (!response.ok) throw new Error(result.error || `保存失败 (${response.status})`);
 
     sessionStorage.setItem("emby-icons-admin-token", token);
+    hasDocument = true;
     currentEtag = response.headers.get("ETag");
     renderJson();
     setDirty(false);
@@ -400,6 +505,10 @@ elements.clearSearch.addEventListener("click", () => {
 
 elements.addButton.addEventListener("click", addIcon);
 elements.emptyAddButton.addEventListener("click", addIcon);
+elements.importButton.addEventListener("click", openImportDialog);
+elements.emptyImportButton.addEventListener("click", openImportDialog);
+elements.exportButton.addEventListener("click", exportDocument);
+elements.copyButton.addEventListener("click", copyDocument);
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictClose.addEventListener("click", dismissConflict);
@@ -419,6 +528,8 @@ elements.tokenForm.addEventListener("submit", (event) => {
   const token = elements.tokenInput.value.trim();
   if (token) saveDocument(token);
 });
+
+elements.importForm.addEventListener("submit", importDocument);
 
 window.addEventListener("beforeunload", (event) => {
   if (!dirty) return;

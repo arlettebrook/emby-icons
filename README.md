@@ -78,7 +78,7 @@ git push origin master
 - 公开配置：`https://<你的域名>/emby-icons.json`
 - 管理 API：`GET/PUT https://<你的域名>/api/icons`
 
-KV 为空时，读取接口会返回仓库中的 `public/emby-icons.seed.json`。在管理面板首次保存后，后续读取会使用 KV 中的版本。
+管理面板和公开配置接口只读取 `EMBY_ICONS` KV。KV 为空时，管理面板会提示导入 JSON；公开配置接口返回 404，不会回退到仓库文件。
 
 注意：在线管理面板保存的是 Cloudflare KV，不会反向修改 GitHub 仓库中的根目录 `emby-icons.json`。
 
@@ -93,4 +93,4 @@ npm test
 - <https://raw.githubusercontent.com/arlettebrook/emby-icons/refs/heads/main/emby-icons.json>
 - <https://s.nek.loc.cc/emby-icons>
 
-新增图标也可以继续 Fork 仓库，修改根目录的 `emby-icons.json` 后提交 PR。
+管理面板支持 JSON 文件导入、JSON 导出、复制 JSON 和粘贴导入。导入写入 KV 前需要管理员令牌。

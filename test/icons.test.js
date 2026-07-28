@@ -23,11 +23,11 @@ function createEnvironment() {
   };
 }
 
-test("GET falls back to the seed document", async () => {
+test("GET does not fall back to repository seed data", async () => {
   const response = await handleGet(new Request("https://example.com/api/icons"), createEnvironment());
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("X-Emby-Icons-Source"), "seed");
-  assert.deepEqual(await response.json(), seed);
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("X-Emby-Icons-Source"), "kv");
+  assert.match((await response.json()).error, /KV/);
 });
 
 test("PUT requires the admin token", async () => {
@@ -79,6 +79,15 @@ test("PUT ignores accidental whitespace around the configured secret", async () 
 
 test("PUT rejects stale ETags when the KV document changed", async () => {
   const env = createEnvironment();
+  const initialWrite = new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(seed),
+  });
+  assert.equal((await handlePut(initialWrite, env)).status, 200);
   const initial = await handleGet(new Request("https://example.com/api/icons"), env);
   const staleEtag = initial.headers.get("ETag");
 
@@ -104,7 +113,7 @@ test("PUT rejects stale ETags when the KV document changed", async () => {
   });
   const response = await handlePut(staleUpdate, env);
   assert.equal(response.status, 412);
-  assert.match((await response.json()).error, /云端内容已被其他会话更新/);
+  assert.match((await response.json()).error, /changed/);
 });
 
 test("PUT rejects invalid icon URLs", async () => {

@@ -18,7 +18,8 @@
           </div>
         </div>
         <div class="header-actions">
-          <a class="button button-secondary" href="/emby-icons.json" target="_blank" rel="noreferrer"><span class="button-icon" aria-hidden="true">↗</span>查看文件</a>
+          <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
+          <button class="button button-secondary" id="export-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>导出 JSON</button>
           <button class="button button-secondary" id="reload-button" type="button"><span class="button-icon" aria-hidden="true">↻</span>重新加载</button>
           <button class="button button-primary" id="save-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>保存更改</button>
         </div>
@@ -95,14 +96,20 @@
             <div class="empty-icon" aria-hidden="true">⌁</div>
             <strong id="empty-title">暂无图标</strong>
             <span id="empty-copy">添加你的第一个图标开始吧。</span>
-            <button class="button button-primary" id="empty-add-button" type="button">添加第一个图标</button>
+            <div class="empty-actions">
+              <button class="button button-primary" id="empty-import-button" type="button">导入 JSON</button>
+              <button class="button button-secondary" id="empty-add-button" type="button">手动添加</button>
+            </div>
           </div>
         </section>
 
         <section class="panel" id="json-panel">
           <div class="json-toolbar">
             <div><span class="json-status-dot" aria-hidden="true"></span><span id="json-message">JSON 有效</span></div>
-            <button class="button button-secondary" id="format-button" type="button"><span class="button-icon" aria-hidden="true">✦</span>格式化</button>
+            <div class="json-actions">
+              <button class="button button-secondary" id="copy-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制 JSON</button>
+              <button class="button button-secondary" id="format-button" type="button"><span class="button-icon" aria-hidden="true">✦</span>格式化</button>
+            </div>
           </div>
           <label class="sr-only" for="json-editor">emby-icons.json 内容</label>
           <textarea id="json-editor" spellcheck="false" autocomplete="off"></textarea>
@@ -129,6 +136,29 @@
         </div>
       </article>
     </template>
+
+    <dialog id="import-dialog">
+      <form method="dialog" id="import-form">
+        <div class="dialog-heading">
+          <h2>导入图标 JSON</h2>
+          <button class="icon-button" value="cancel" formmethod="dialog" aria-label="关闭" title="关闭">×</button>
+        </div>
+        <p class="dialog-lead">选择 JSON 文件，或将 JSON 粘贴到下方。导入会直接保存到 Cloudflare KV，需要管理员令牌。</p>
+        <label class="field import-file-field">
+          <span>JSON 文件</span>
+          <input id="import-file" type="file" accept=".json,application/json" />
+        </label>
+        <label class="field import-paste-field">
+          <span>粘贴 JSON</span>
+          <textarea id="import-editor" spellcheck="false" placeholder="{\n  &quot;name&quot;: &quot;Emby Icons&quot;,\n  &quot;description&quot;: &quot;&quot;,\n  &quot;icons&quot;: []\n}"></textarea>
+        </label>
+        <p class="dialog-error" id="import-error"></p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" value="cancel" formmethod="dialog">取消</button>
+          <button class="button button-primary" value="default" type="submit">导入并保存</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="token-dialog">
       <form method="dialog" id="token-form" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">

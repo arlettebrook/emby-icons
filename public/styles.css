@@ -182,6 +182,10 @@ h1 {
   background: var(--coral);
 }
 
+.status-dot.warning {
+  background: var(--warm);
+}
+
 .conflict-banner {
   width: min(1180px, calc(100% - 40px));
   position: relative;
@@ -1077,6 +1081,36 @@ body {
   min-height: 54px;
 }
 
+.json-actions,
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-paste-field textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 11px;
+  border: 1px solid #d1dfe0;
+  border-radius: 9px;
+  outline: none;
+  background: #fbfdfd;
+  color: var(--ink);
+  font: 12px/1.6 "Cascadia Code", Consolas, monospace;
+}
+
+.import-paste-field textarea:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgb(38 135 162 / 12%);
+}
+
+.import-file-field input {
+  height: auto;
+  padding: 9px 11px;
+}
+
 .json-toolbar > div {
   display: flex;
   align-items: center;
@@ -1228,6 +1262,16 @@ dialog .field input {
 }
 
 @media (max-width: 560px) {
+  .json-actions,
+  .empty-actions {
+    width: 100%;
+  }
+
+  .json-actions .button,
+  .empty-actions .button {
+    flex: 1;
+  }
+
   .dialog-actions {
     display: grid;
     grid-template-columns: 1fr 1.35fr;
