@@ -926,6 +926,177 @@ body {
   gap: 10px;
 }
 
+/* Responsive control-center layout. */
+@media (max-width: 980px) {
+  .header-inner {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px 0;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .header-actions .button {
+    min-width: 0;
+    padding-inline: 9px;
+    white-space: nowrap;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .list-tools {
+    width: 100%;
+  }
+
+  .search-field {
+    flex: 1 1 220px;
+    width: auto;
+  }
+
+  .sort-field {
+    flex: 0 1 auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .header-inner,
+  .status-inner,
+  .workspace {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .header-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .header-actions .button {
+    width: 100%;
+  }
+
+  .status-inner {
+    min-height: 42px;
+    flex-wrap: wrap;
+    padding-block: 8px;
+  }
+
+  .document-state {
+    margin-left: auto;
+  }
+
+  .list-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+    gap: 8px;
+  }
+
+  .search-field {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .sort-field {
+    min-width: 0;
+    justify-content: space-between;
+  }
+
+  .sort-field select {
+    min-width: 0;
+    max-width: 150px;
+  }
+
+  .list-tools > .button {
+    width: 100%;
+  }
+
+  .metadata-grid {
+    gap: 12px;
+  }
+
+  .workspace-intro h2 {
+    max-width: 100%;
+    font-size: 28px;
+  }
+
+  .overview-stats {
+    width: 100%;
+  }
+
+  .overview-stat {
+    min-width: 0;
+    padding-inline: 10px;
+  }
+
+  .overview-stat span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-inner,
+  .status-inner,
+  .workspace,
+  .conflict-banner {
+    width: calc(100% - 20px);
+  }
+
+  .brand-block {
+    gap: 9px;
+  }
+
+  .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .header-actions .button {
+    min-height: 38px;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+
+  .header-actions .button-icon {
+    display: none;
+  }
+
+  .workspace {
+    padding-top: 22px;
+  }
+
+  .overview-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overview-stat strong {
+    font-size: 16px;
+  }
+
+  .overview-stat span {
+    font-size: 10px;
+  }
+
+  .icon-row {
+    grid-template-columns: 40px minmax(0, 1fr) 72px;
+    padding: 10px;
+  }
+
+  .icon-preview {
+    width: 40px;
+    height: 40px;
+  }
+}
+
 .sort-field {
   display: flex;
   align-items: center;
@@ -1013,6 +1184,30 @@ body {
 .clear-search:hover {
   background: #edf3f2;
   color: var(--ink);
+}
+
+/* Keep one clear control: the visible button is the accessible custom action. */
+.search-field input[type="search"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.search-field input[type="search"]::-webkit-search-cancel-button,
+.search-field input[type="search"]::-webkit-search-decoration {
+  display: none;
+  width: 0;
+  height: 0;
+  -webkit-appearance: none;
+}
+
+.search-field input[type="search"]::-ms-clear {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.clear-search[hidden] {
+  display: none;
 }
 
 .icon-list {
@@ -1399,5 +1594,144 @@ dialog .field input {
 
   .remote-fetch-button {
     width: 100%;
+  }
+}
+
+/* Final responsive overrides keep the toolbar stable after the theme rules above. */
+@media (max-width: 980px) {
+  .header-inner {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-block: 16px;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .header-actions .button {
+    min-width: 0;
+    padding-inline: 9px;
+    white-space: nowrap;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .list-tools {
+    width: 100%;
+  }
+
+  .search-field {
+    flex: 1 1 220px;
+    width: auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .header-inner,
+  .status-inner,
+  .workspace {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .header-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .header-actions .button {
+    width: 100%;
+  }
+
+  .status-inner {
+    min-height: 42px;
+    flex-wrap: wrap;
+    padding-block: 8px;
+  }
+
+  .list-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+    gap: 8px;
+  }
+
+  .search-field {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .sort-field {
+    min-width: 0;
+    justify-content: space-between;
+  }
+
+  .sort-field select {
+    min-width: 0;
+    max-width: 150px;
+  }
+
+  .list-tools > .button {
+    width: 100%;
+  }
+
+  .metadata-grid {
+    gap: 12px;
+  }
+
+  .overview-stats {
+    width: 100%;
+  }
+
+  .overview-stat {
+    min-width: 0;
+    padding-inline: 10px;
+  }
+
+  .overview-stat span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-inner,
+  .status-inner,
+  .workspace,
+  .conflict-banner {
+    width: calc(100% - 20px);
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .header-actions .button {
+    min-height: 38px;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+
+  .header-actions .button-icon {
+    display: none;
+  }
+
+  .workspace {
+    padding-top: 22px;
+  }
+
+  .workspace-intro h2 {
+    font-size: 28px;
+  }
+
+  .overview-stat strong {
+    font-size: 16px;
+  }
+
+  .overview-stat span {
+    font-size: 10px;
   }
 }

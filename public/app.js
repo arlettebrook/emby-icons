@@ -118,6 +118,10 @@ function showToast(message) {
   toastTimer = setTimeout(() => elements.toast.classList.remove("show"), 2600);
 }
 
+function updateSearchClearButton() {
+  elements.clearSearch.hidden = elements.searchInput.value.length === 0;
+}
+
 function parseImportedIcons(raw) {
   let value;
   try {
@@ -653,6 +657,7 @@ elements.formatButton.addEventListener("click", () => {
 elements.searchInput.addEventListener("input", () => {
   filterQuery = elements.searchInput.value;
   renderLimit = 60;
+  updateSearchClearButton();
   scheduleIconListRender();
 });
 
@@ -660,6 +665,7 @@ elements.clearSearch.addEventListener("click", () => {
   filterQuery = "";
   elements.searchInput.value = "";
   renderLimit = 60;
+  updateSearchClearButton();
   renderIconList();
   elements.searchInput.focus();
 });
@@ -744,4 +750,5 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+updateSearchClearButton();
 loadDocument();
