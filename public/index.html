@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui6" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui7" />
   </head>
   <body>
     <header class="app-header">
@@ -19,7 +19,7 @@
         </div>
         <div class="header-actions">
           <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
-          <button class="button button-secondary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制公开配置</button>
+          <button class="button button-secondary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制图标库地址</button>
           <button class="button button-secondary" id="export-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>导出 JSON</button>
           <button class="button button-secondary" id="reload-button" type="button"><span class="button-icon" aria-hidden="true">↻</span>重新加载</button>
           <button class="button button-primary" id="save-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>保存更改</button>
@@ -140,7 +140,7 @@
           <span>图片地址</span>
           <input type="url" data-field="url" autocomplete="off" />
         </label>
-        <div class="row-actions">
+        <div class="row-actions" aria-label="图标操作">
           <button class="icon-button move-up" type="button" title="上移" aria-label="上移">↑</button>
           <button class="icon-button move-down" type="button" title="下移" aria-label="下移">↓</button>
           <button class="icon-button danger delete-icon" type="button" title="删除" aria-label="删除">×</button>
@@ -214,6 +214,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js?v=20260729-ui6"></script>
+    <script type="module" src="/app.js?v=20260729-ui7"></script>
   </body>
 </html>

@@ -272,7 +272,7 @@ async function copyPublicConfig() {
   try {
     const publicUrl = new URL("/emby-icons.json", window.location.origin).href;
     await navigator.clipboard.writeText(publicUrl);
-    showToast("公开配置 URL 已复制到剪贴板");
+    showToast("图标库地址已复制到剪贴板");
   } catch (error) {
     showToast(error.message || "复制失败，请检查浏览器权限");
   }
@@ -355,13 +355,18 @@ function syncFromJson() {
 
 function updatePreview(image, url) {
   const preview = image.closest(".icon-preview");
-  image.hidden = !url;
-  image.src = url || "";
-  if (url) preview.href = url;
+  const normalizedUrl = url.trim();
+  image.hidden = !normalizedUrl;
+  image.src = normalizedUrl || "";
+  if (normalizedUrl) preview.href = normalizedUrl;
   else preview.removeAttribute("href");
-  preview.tabIndex = url ? 0 : -1;
-  preview.classList.toggle("is-empty", !url);
+  preview.tabIndex = normalizedUrl ? 0 : -1;
+  preview.classList.toggle("is-empty", !normalizedUrl);
   preview.classList.remove("is-broken", "has-image");
+  if (!normalizedUrl) {
+    image.removeAttribute("src");
+    return;
+  }
   image.onerror = () => {
     image.hidden = true;
     preview.classList.add("is-broken");

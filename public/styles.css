@@ -1571,7 +1571,8 @@ dialog .field input {
 }
 
 .icon-preview.is-empty::before {
-  content: "添加图片";
+  content: "等待地址";
+  color: #93a8a7;
 }
 
 .icon-preview.is-broken::before {
@@ -1585,6 +1586,10 @@ dialog .field input {
 
 .icon-preview.is-broken {
   background: #fff7f6;
+}
+
+.icon-row .row-actions {
+  min-width: 0;
 }
 
 @media (max-width: 560px) {
@@ -1733,5 +1738,28 @@ dialog .field input {
 
   .overview-stat span {
     font-size: 10px;
+  }
+
+  .icon-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .icon-row .url-field,
+  .icon-row .row-actions {
+    grid-column: 1 / -1;
+  }
+
+  .icon-row .row-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .icon-row .row-actions .icon-button {
+    width: 100%;
+    height: 34px;
+    border-radius: 6px;
   }
 }
