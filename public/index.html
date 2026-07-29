@@ -12,15 +12,6 @@
       .home-header h1 { margin: 0 0 8px; font-size: clamp(32px, 6vw, 58px); letter-spacing: -0.04em; }
       .home-header p { max-width: 640px; color: var(--muted); line-height: 1.7; }
       .home-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-      .home-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
-      .home-stat { min-width: 135px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
-      .home-stat strong { display: block; color: var(--accent); font-size: 20px; }
-      .home-stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
-      .home-metadata { display: grid; grid-template-columns: minmax(150px, .35fr) minmax(0, 1fr); gap: 12px; margin-top: 14px; }
-      .home-metadata-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
-      .home-metadata-card > span { display: block; color: var(--muted); font: 11px "Cascadia Code", Consolas, monospace; text-transform: uppercase; }
-      .home-metadata-card strong, .home-metadata-card p { display: block; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.55; }
-      .home-metadata-card p { color: var(--muted); }
       .home-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 32px; }
       .home-search { flex: 1; min-width: 0; }
       .home-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -34,16 +25,16 @@
       .icon-card strong { display: block; margin-top: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .icon-card small { display: block; margin-top: 5px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
       .home-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--muted); font-size: 13px; }
-      @media (max-width: 760px) { .home-header { align-items: flex-start; flex-direction: column; } .home-actions { justify-content: flex-start; } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } }
+      @media (max-width: 760px) { .home-header { align-items: flex-start; flex-direction: column; } .home-actions { justify-content: flex-start; } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } }
     </style>
   </head>
   <body>
     <main class="home-page">
       <header class="home-header">
         <div>
-          <p class="eyebrow">EMBY ICONS / PUBLIC LIBRARY</p>
+          <p class="eyebrow">ICON LIBRARY / PUBLIC VIEW</p>
           <h1 id="home-name">Emby Icons</h1>
-          <p id="home-description">浏览已发布的 Emby 图标，搜索、复制并使用图标地址。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。</p>
+          <p id="home-description">浏览已发布的 Emby 图标。</p>
         </div>
         <div class="home-actions">
           <a class="button button-primary" href="/submit.html">提交图标</a>
@@ -52,15 +43,6 @@
           <a class="button button-secondary" href="/admin.html">管理员登录</a>
         </div>
       </header>
-      <section class="home-stats" aria-label="图标库概览">
-        <div class="home-stat"><strong id="home-total">0</strong><span>图标总数</span></div>
-        <div class="home-stat"><strong>JSON</strong><span>公开格式</span></div>
-        <div class="home-stat"><strong>KV</strong><span>当前来源</span></div>
-      </section>
-      <section class="home-metadata" aria-label="图标库信息">
-        <div class="home-metadata-card"><span>name</span><strong id="home-meta-name">Emby Icons</strong></div>
-        <div class="home-metadata-card"><span>description</span><p id="home-meta-description">浏览已发布的 Emby 图标，搜索、复制并使用图标地址。</p></div>
-      </section>
       <section class="home-toolbar" aria-label="图标搜索">
         <label class="search-field home-search" for="home-search">
           <span aria-hidden="true">⌕</span>
