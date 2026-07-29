@@ -21,7 +21,16 @@
       .moderation-item p { margin: 3px 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
       .moderation-actions { display: flex; gap: 8px; }
       .moderation-actions .danger { border-color: rgb(255 113 140 / 45%); color: var(--danger); }
-      .telegram-settings { margin-top: 20px; padding: 17px; border: 1px solid var(--line); border-radius: 11px; background: rgb(7 16 14 / 62%); }
+      .telegram-settings { margin-top: 20px; padding: 0 17px 17px; border: 1px solid var(--line); border-radius: 11px; background: rgb(7 16 14 / 62%); }
+      .telegram-settings-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 0; cursor: pointer; list-style: none; }
+      .telegram-settings-summary::-webkit-details-marker { display: none; }
+      .telegram-settings-summary::after { content: "⌄"; color: var(--muted); font-size: 18px; transition: transform 150ms ease; }
+      .telegram-settings[open] .telegram-settings-summary { border-bottom: 1px solid var(--line); }
+      .telegram-settings[open] .telegram-settings-summary::after { transform: rotate(180deg); }
+      .telegram-settings-summary h3 { margin: 3px 0 4px; font-size: 15px; }
+      .telegram-settings-summary p:last-child { color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .telegram-settings-badge { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); font-size: 11px; }
+      .telegram-settings-body { padding-top: 16px; }
       .telegram-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
       .telegram-settings-heading h3 { margin: 3px 0 5px; font-size: 15px; }
       .telegram-settings-heading p:last-child, .telegram-field-note, .telegram-settings-status { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -190,32 +199,38 @@
           </div>
           <div class="moderation-actions"><button class="button button-secondary" id="moderation-refresh" type="button">刷新队列</button><button class="button button-secondary" id="moderation-close-button" type="button">关闭</button></div>
         </div>
-        <section class="telegram-settings" aria-labelledby="telegram-settings-title">
-          <div class="telegram-settings-heading">
+        <details class="telegram-settings" id="telegram-settings">
+          <summary class="telegram-settings-summary">
             <div>
               <p class="eyebrow">TELEGRAM NOTIFICATION</p>
               <h3 id="telegram-settings-title">新提交通知</h3>
-              <p>普通用户提交后，Telegram Bot 会将提交信息发送到指定会话。</p>
+              <p>点击展开配置 Telegram Bot 通知。</p>
             </div>
-            <label class="telegram-switch"><input id="telegram-enabled" type="checkbox" />启用通知</label>
+            <span class="telegram-settings-badge">通知配置</span>
+          </summary>
+          <div class="telegram-settings-body">
+            <div class="telegram-settings-heading">
+              <div><p>普通用户提交后，Telegram Bot 会将提交信息发送到指定会话。</p></div>
+              <label class="telegram-switch"><input id="telegram-enabled" type="checkbox" />启用通知</label>
+            </div>
+            <div class="telegram-settings-grid">
+              <label class="field">
+                <span>Bot Token</span>
+                <input id="telegram-bot-token" type="password" autocomplete="new-password" placeholder="留空则保持当前 Token" />
+                <small class="telegram-field-note" id="telegram-token-note">Token 会加密保存在服务端，不会回显到页面。</small>
+              </label>
+              <label class="field">
+                <span>Chat ID</span>
+                <input id="telegram-chat-id" type="text" autocomplete="off" placeholder="例如：-1001234567890" />
+                <small class="telegram-field-note">Bot 必须先加入目标群组，或先由目标用户向 Bot 发消息。</small>
+              </label>
+            </div>
+            <div class="telegram-settings-footer">
+              <p class="telegram-settings-status" id="telegram-settings-status" role="status"></p>
+              <button class="button button-primary" id="telegram-save-button" type="button">保存通知设置</button>
+            </div>
           </div>
-          <div class="telegram-settings-grid">
-            <label class="field">
-              <span>Bot Token</span>
-              <input id="telegram-bot-token" type="password" autocomplete="new-password" placeholder="留空则保持当前 Token" />
-              <small class="telegram-field-note" id="telegram-token-note">Token 会加密保存在服务端，不会回显到页面。</small>
-            </label>
-            <label class="field">
-              <span>Chat ID</span>
-              <input id="telegram-chat-id" type="text" autocomplete="off" placeholder="例如：-1001234567890" />
-              <small class="telegram-field-note">Bot 必须先加入目标群组，或先由目标用户向 Bot 发消息。</small>
-            </label>
-          </div>
-          <div class="telegram-settings-footer">
-            <p class="telegram-settings-status" id="telegram-settings-status" role="status"></p>
-            <button class="button button-primary" id="telegram-save-button" type="button">保存通知设置</button>
-          </div>
-        </section>
+        </details>
         <p class="moderation-status" id="moderation-status">正在加载待审核提交…</p>
         <div class="moderation-list" id="moderation-list"></div>
       </section>

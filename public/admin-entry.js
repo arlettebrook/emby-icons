@@ -18,7 +18,7 @@ async function loadAdminApp() {
   loginView.hidden = true;
   app.hidden = false;
   await import("/admin-shell.js");
-  await import("/admin-review.js");
+  await import("/admin-review.js?v=20260729-ui14");
   await import("/app.js?v=20260729-ui12");
 }
 

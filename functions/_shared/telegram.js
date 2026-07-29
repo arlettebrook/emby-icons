@@ -115,7 +115,9 @@ export async function handleAdminTelegramSettings(request, env) {
   try {
     current = await readSettings(env);
   } catch (error) {
-    return jsonResponse(request, { error: error.message }, { status: 500 });
+    // Allow an administrator to replace a stale/corrupt record by submitting a new Token.
+    if (request.method !== "PUT") return jsonResponse(request, { error: error.message }, { status: 500 });
+    current = { enabled: false, chatId: "", token: "" };
   }
 
   if (request.method === "GET") return jsonResponse(request, publicSettings(current));
@@ -149,13 +151,21 @@ export async function handleAdminTelegramSettings(request, env) {
     token: token ? await encryptToken(token, env) : null,
     updatedAt: Date.now(),
   };
-  await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify(record));
-  await writeAuditLog(env, {
-    actorId: "admin",
-    action: "telegram-settings-updated",
-    targetId: SETTINGS_KEY,
-    details: { enabled, configured: Boolean(token), chatId },
-  });
+  try {
+    await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify(record));
+  } catch {
+    return jsonResponse(request, { error: "Telegram 配置保存失败，请检查 EMBY_ICONS KV 绑定" }, { status: 503 });
+  }
+  try {
+    await writeAuditLog(env, {
+      actorId: "admin",
+      action: "telegram-settings-updated",
+      targetId: SETTINGS_KEY,
+      details: { enabled, configured: Boolean(token), chatId },
+    });
+  } catch (error) {
+    console.error("Telegram settings audit log failed", error);
+  }
   return jsonResponse(request, publicSettings({ enabled, chatId, token }));
 }
 
