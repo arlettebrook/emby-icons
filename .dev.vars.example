@@ -1,4 +1,5 @@
 ADMIN_TOKEN=replace-with-a-long-random-token
+ADMIN_SESSION_SECRET=replace-with-a-separate-session-signing-secret
 SUBMISSION_HASH_SECRET=replace-with-another-long-random-secret
 REQUIRE_TURNSTILE=false
 # TURNSTILE_SECRET_KEY=replace-with-turnstile-secret

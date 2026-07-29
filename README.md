@@ -75,10 +75,9 @@ git push origin master
 ## 地址
 
 - 管理员面板：`https://<你的域名>/admin.html`
-- 正式库编辑器：`https://<你的域名>/`
+- 正式库编辑器：`https://<你的域名>/admin.html`
 - 普通用户提交：`https://<你的域名>/submit.html`
 - 提交状态：`https://<你的域名>/submission.html?id=<提交编号>`
-- 管理员审核：`https://<你的域名>/review.html`
 - 公开配置：`https://<你的域名>/emby-icons.json`
 - 管理 API：`GET/PUT https://<你的域名>/api/icons`
 - 管理员远程导入：`POST https://<你的域名>/api/import`
@@ -95,13 +94,14 @@ npm test
 
 ## 普通用户提交图标
 
-普通用户通过 `/submit.html` 提交图标名称和 HTTPS URL。提交内容只会写入 D1 的待审核队列，不会直接修改 `EMBY_ICONS`；管理员在 `/review.html` 审核通过后，系统才会把图标追加到正式 KV 文档。
+普通用户通过 `/submit.html` 提交图标名称和 HTTPS URL。提交内容只会写入 D1 的待审核队列，不会直接修改 `EMBY_ICONS`；管理员登录 `/admin.html` 后，在同一页面的审核区域审核，审核通过后系统才会把图标追加到正式 KV 文档。
 
 需要在 Cloudflare Pages 中配置以下绑定和变量：
 
 - D1 database binding：变量名必须是 `DB`，先执行 `migrations/0001_submissions.sql`。
 - KV binding：变量名仍是 `EMBY_ICONS`。
 - Secret `ADMIN_TOKEN`：只给管理员使用，不能发给普通用户。
+- Secret `ADMIN_SESSION_SECRET`：用于签发管理员网页登录会话，建议使用独立随机值。
 - Secret `SUBMISSION_HASH_SECRET`：用于哈希提交访问令牌和 IP，建议使用独立随机值。
 - `TURNSTILE_SECRET_KEY`：生产环境建议配置，并将 `REQUIRE_TURNSTILE` 设为 `true`。
 
