@@ -6,22 +6,22 @@
     <meta name="color-scheme" content="dark" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui13" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui15" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
-      .moderation-panel { padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 96%); box-shadow: var(--shadow); }
+      .moderation-panel { padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .moderation-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
       .moderation-heading h2 { margin: 4px 0 6px; }
       .moderation-heading p:last-child, .moderation-status { color: var(--muted); font-size: 13px; line-height: 1.55; }
       .moderation-list { display: grid; gap: 10px; margin-top: 16px; }
-      .moderation-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: rgb(7 16 14 / 72%); }
+      .moderation-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
       .moderation-item img { width: 58px; height: 58px; object-fit: contain; border-radius: 8px; background: #07100e; }
       .moderation-item h3 { margin: 0 0 4px; font-size: 15px; }
       .moderation-item p { margin: 3px 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
       .moderation-actions { display: flex; gap: 8px; }
       .moderation-actions .danger { border-color: rgb(255 113 140 / 45%); color: var(--danger); }
-      .telegram-settings { margin-top: 20px; padding: 0 17px 17px; border: 1px solid var(--line); border-radius: 11px; background: rgb(7 16 14 / 62%); }
+      .telegram-settings { margin-top: 20px; padding: 0 17px 17px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }
       .telegram-settings-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 0; cursor: pointer; list-style: none; }
       .telegram-settings-summary::-webkit-details-marker { display: none; }
       .telegram-settings-summary::after { content: "⌄"; color: var(--muted); font-size: 18px; transition: transform 150ms ease; }
@@ -43,7 +43,7 @@
       .telegram-settings-status.is-error { color: var(--danger); }
       .telegram-settings-status.is-success { color: var(--accent); }
       .admin-login-view { width: min(470px, calc(100% - 32px)); margin: 0 auto; padding: 100px 0; }
-      .admin-login-card { padding: 30px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 90%); box-shadow: var(--shadow); }
+      .admin-login-card { padding: 30px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .admin-login-card h1 { margin: 0 0 10px; }
       .admin-login-card > p { color: var(--muted); line-height: 1.6; }
       .admin-login-form { display: grid; gap: 16px; margin-top: 24px; }
