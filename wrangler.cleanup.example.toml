@@ -1,0 +1,19 @@
+name = "emby-icons-d1-cleanup"
+main = "workers/d1-cleanup.js"
+compatibility_date = "2026-07-29"
+
+[triggers]
+crons = ["0 3 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "replace-with-your-d1-name"
+database_id = "replace-with-your-d1-id"
+
+# Optional environment variables. These defaults are also used when omitted.
+# CLEANUP_SUBMISSIONS_DAYS = "180"
+# CLEANUP_AUDIT_LOGS_DAYS = "365"
+# CLEANUP_DOCUMENT_VERSIONS_DAYS = "365"
+# CLEANUP_DOCUMENT_VERSIONS_KEEP = "20"
+# CLEANUP_BATCH_SIZE = "100"
+# CLEANUP_MAX_BATCHES = "10"
