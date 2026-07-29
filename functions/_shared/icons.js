@@ -1,4 +1,5 @@
 import { hasAdminAccess } from "./admin.js";
+import { readGithubProxySettings, transformGithubProxyDocument } from "./github-proxy.js";
 
 const STORAGE_KEY = "emby-icons.json";
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -94,7 +95,7 @@ export async function writeAuditLog(env, { actorId, action, targetId, details })
     .run();
 }
 
-export async function handleGet(request, env, cacheControl = "no-cache") {
+export async function handleGet(request, env, cacheControl = "no-cache", { useGithubProxy = false } = {}) {
   try {
     const { text, etag, source } = await readDocument(env);
     if (text === null) {
@@ -110,12 +111,20 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
       );
     }
 
-    return new Response(text, {
+    let responseText = text;
+    let responseEtag = etag;
+    if (useGithubProxy) {
+      const transformed = transformGithubProxyDocument(text, await readGithubProxySettings(env));
+      responseText = transformed.text;
+      if (transformed.changed) responseEtag = await createEtag(responseText);
+    }
+
+    return new Response(responseText, {
       headers: {
         ...corsHeaders,
         "Cache-Control": cacheControl === "no-cache" ? "no-store, no-cache, must-revalidate" : cacheControl,
         "Content-Type": "application/json; charset=utf-8",
-        ETag: etag,
+        ETag: responseEtag,
         "X-Emby-Icons-Source": source,
       },
     });

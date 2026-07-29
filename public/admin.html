@@ -42,6 +42,15 @@
       .telegram-settings-status { min-height: 18px; }
       .telegram-settings-status.is-error { color: var(--danger); }
       .telegram-settings-status.is-success { color: var(--accent); }
+      .github-proxy-dialog { width: min(620px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
+      .github-proxy-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
+      .github-proxy-panel { padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+      .github-proxy-lead { color: var(--muted); font-size: 13px; line-height: 1.6; }
+      .github-proxy-toggle { display: flex; align-items: center; gap: 9px; margin: 18px 0 14px; color: var(--ink); font-size: 14px; font-weight: 680; }
+      .github-proxy-toggle input { width: 17px; height: 17px; accent-color: var(--accent); }
+      .github-proxy-status { min-height: 20px; color: var(--muted); font-size: 13px; }
+      .github-proxy-status.is-error { color: var(--danger); }
+      .github-proxy-status.is-success { color: var(--accent); }
       .admin-login-view { width: min(470px, calc(100% - 32px)); margin: 0 auto; padding: 100px 0; }
       .admin-login-card { padding: 30px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .admin-login-card h1 { margin: 0 0 10px; }

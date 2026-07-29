@@ -113,7 +113,8 @@ function render() {
 
 async function load() {
   try {
-    const response = await fetch("/emby-icons.json", { cache: "no-store" });
+    // The website must always display and copy the original icon URLs.
+    const response = await fetch("/api/icons", { cache: "no-store" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `加载失败（${response.status}）`);
     if (!Array.isArray(body.icons)) throw new Error("公开图标库格式无效");
