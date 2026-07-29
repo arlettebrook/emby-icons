@@ -139,6 +139,23 @@ async function setTelegramWebhook(token, origin, secret) {
   });
 }
 
+async function ensureWebhookForSettings(env, settings, origin) {
+  if (settings.webhookSecret || !origin) return false;
+  const webhookSecret = createSecret();
+  const record = {
+    version: 1,
+    enabled: settings.enabled,
+    chatId: settings.chatId,
+    token: await encryptToken(settings.token, env),
+    webhookSecret: await encryptToken(webhookSecret, env),
+    updatedAt: Date.now(),
+  };
+  await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify(record));
+  await setTelegramWebhook(settings.token, origin, webhookSecret);
+  settings.webhookSecret = webhookSecret;
+  return true;
+}
+
 async function sendTelegramMessage(token, chatId, text, replyMarkup) {
   return telegramApi(token, "sendMessage", {
     chat_id: chatId,
@@ -255,15 +272,27 @@ export async function handleAdminTelegramSettings(request, env) {
   return jsonResponse(request, { ...publicSettings({ enabled, chatId, token, webhookSecret }), webhookConfigured, warning: webhookWarning });
 }
 
-export async function notifyNewSubmission(env, submission) {
+export async function notifyNewSubmission(env, submission, origin = "") {
   const settings = await readSettings(env);
   if (!settings.enabled || !settings.token || !settings.chatId) return false;
+  if (!settings.webhookSecret) {
+    try {
+      await ensureWebhookForSettings(env, settings, origin);
+    } catch (error) {
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "telegram-webhook-migration-failed",
+        targetId: submission.id,
+        details: { error: String(error.message || "Webhook migration failed").slice(0, 240) },
+      }).catch(() => {});
+    }
+  }
   await sendTelegramMessage(settings.token, settings.chatId, submissionMessage(submission), settings.webhookSecret ? submissionKeyboard(submission.id) : null);
   return true;
 }
 
-export async function queueSubmissionNotification(env, submission, waitUntil) {
-  const task = notifyNewSubmission(env, submission).catch(async (error) => {
+export async function queueSubmissionNotification(env, submission, waitUntil, origin = "") {
+  const task = notifyNewSubmission(env, submission, origin).catch(async (error) => {
     await writeAuditLog(env, {
       actorId: "system",
       action: "telegram-notification-failed",

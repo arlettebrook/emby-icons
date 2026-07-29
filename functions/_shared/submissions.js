@@ -238,7 +238,7 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
     name: validation.value.name,
     url: validation.value.url,
     note: validation.value.note,
-  }, waitUntil);
+  }, waitUntil, new URL(request.url).origin);
 
   return jsonResponse(
     request,
