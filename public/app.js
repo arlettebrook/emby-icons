@@ -62,7 +62,7 @@ let conflictActive = false;
 let hasDocument = false;
 let forceSaveRequested = false;
 let sortMode = "manual";
-let renderLimit = 60;
+let renderLimit = 24;
 let searchIndex = [];
 let renderFrame = 0;
 
@@ -474,7 +474,7 @@ function addIcon() {
   elements.iconSort.value = sortMode;
   filterQuery = "";
   elements.searchInput.value = "";
-  renderLimit = 60;
+  renderLimit = 24;
   renderStructured();
   setDirty(true);
   requestAnimationFrame(() => {
@@ -693,7 +693,7 @@ elements.formatButton.addEventListener("click", () => {
 
 elements.searchInput.addEventListener("input", () => {
   filterQuery = elements.searchInput.value;
-  renderLimit = 60;
+  renderLimit = 24;
   updateSearchClearButton();
   scheduleIconListRender();
 });
@@ -701,7 +701,7 @@ elements.searchInput.addEventListener("input", () => {
 elements.clearSearch.addEventListener("click", () => {
   filterQuery = "";
   elements.searchInput.value = "";
-  renderLimit = 60;
+  renderLimit = 24;
   updateSearchClearButton();
   renderIconList();
   elements.searchInput.focus();
@@ -709,7 +709,7 @@ elements.clearSearch.addEventListener("click", () => {
 
 elements.iconSort.addEventListener("change", () => {
   sortMode = elements.iconSort.value;
-  renderLimit = 60;
+  renderLimit = 24;
   const changed = sortDocumentIcons(sortMode);
   rebuildSearchIndex();
   renderIconList();
@@ -721,7 +721,7 @@ elements.iconSort.addEventListener("change", () => {
 });
 
 elements.loadMoreButton.addEventListener("click", () => {
-  renderLimit += 60;
+  renderLimit += 24;
   renderIconList();
 });
 

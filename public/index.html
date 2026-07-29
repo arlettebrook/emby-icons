@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>Emby Icons 图标库</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui20" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui23" />
     <style>
       .home-page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 70px; }
       .home-header { max-width: 780px; }
@@ -39,10 +39,21 @@
       .home-copy-button.is-copied { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
       .home-load-more { display: block; min-width: 160px; margin: 18px auto 0; }
       .home-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--muted); font-size: 13px; }
+      .home-footer-meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+      .home-footer-badge { display: inline-flex; align-items: center; min-height: 32px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: rgb(255 255 255 / 78%); box-shadow: 0 6px 16px rgb(15 23 42 / 7%); color: var(--muted); letter-spacing: 0.02em; }
+      .home-copy-hint { gap: 6px; cursor: pointer; font: inherit; }
+      .home-copy-hint::before { content: "↗"; color: #0ea5e9; font-weight: 700; }
+      .home-copy-hint:hover { border-color: #7dd3fc; background: #effaff; color: #0369a1; }
+      .home-copy-hint.is-copied { border-color: #7dd3fc; background: #e0f2fe; color: #0369a1; }
+      .home-footer a { color: #0ea5e9; font-weight: 680; text-decoration: none; }
+      .home-footer a:hover { color: #0284c7; text-decoration: underline; text-underline-offset: 3px; }
+      .home-footer-credit { align-self: flex-end; }
       @media (max-width: 680px) { .home-page { width: calc(100% - 28px); padding-top: 32px; } .home-header h1 { font-size: clamp(30px, 9vw, 42px); } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } .icon-card .home-icon-preview, .icon-card img { height: 116px; } }
       @media (max-width: 420px) { .home-page { width: calc(100% - 20px); padding-top: 26px; } .home-header h1 { font-size: 29px; } .home-grid { grid-template-columns: 1fr; } }
     </style>
     <style>
+      .home-page { min-height: calc(100vh - 84px); display: flex; flex-direction: column; }
+      .home-footer { width: 100%; margin-top: auto; }
       @media (max-width: 680px) {
         .home-page { width: calc(100% - 28px); padding-top: 28px; padding-bottom: 48px; }
         .home-header h1 { font-size: clamp(29px, 8.8vw, 40px); }
@@ -56,7 +67,9 @@
         .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
         .icon-card { padding: 10px; }
         .icon-card .home-icon-preview, .icon-card img { height: 112px; }
-        .home-footer { align-items: flex-start; flex-direction: column; gap: 6px; margin-top: 26px; }
+        .home-footer { align-items: flex-start; flex-direction: column; gap: 10px; margin-top: 26px; }
+        .home-footer-meta { align-items: flex-start; flex-direction: column; gap: 7px; }
+        .home-footer-credit { align-self: flex-end; }
       }
       @media (max-width: 420px) {
         .home-page { width: calc(100% - 20px); padding-top: 24px; }
@@ -117,7 +130,13 @@
       <section class="home-grid" id="home-grid" aria-live="polite"></section>
       <button class="button button-secondary home-load-more" id="home-load-more" type="button" hidden>加载更多图标</button>
       <p class="home-empty" id="home-empty" hidden>没有找到匹配的图标。</p>
-      <footer class="home-footer"><span id="home-updated">数据来自公开图标库</span><span>公开图标库地址可使用上方按钮复制</span></footer>
+      <footer class="home-footer">
+        <div class="home-footer-meta">
+          <span id="home-updated" class="home-footer-badge">公开图标库 · 正在同步</span>
+          <button class="home-copy-hint home-footer-badge" id="copy-library-footer-button" type="button">点击复制该图标库</button>
+        </div>
+        <a class="home-footer-credit home-footer-badge" href="https://github.com/arlettebrook/emby-icons" target="_blank" rel="noreferrer">EMBY-ICONS by NaN</a>
+      </footer>
     </main>
     <script type="module" src="/home.js"></script>
   </body>

@@ -7,6 +7,7 @@ const updated = document.querySelector("#home-updated");
 const total = document.querySelector("#home-total");
 const copyLibraryButton = document.querySelector("#copy-library-button");
 const copyLibraryLabel = document.querySelector("#copy-library-label");
+const copyLibraryFooterButton = document.querySelector("#copy-library-footer-button");
 const loadMoreButton = document.querySelector("#home-load-more");
 const metaName = document.querySelector("#home-meta-name");
 const metaDescription = document.querySelector("#home-meta-description");
@@ -151,6 +152,21 @@ copyLibraryButton.addEventListener("click", async () => {
     window.setTimeout(() => { copyLibraryLabel.textContent = "复制图标库地址"; }, 2200);
   } catch {
     window.prompt("请复制图标库地址", libraryUrl);
+  }
+});
+
+copyLibraryFooterButton?.addEventListener("click", async () => {
+  const libraryUrl = new URL("/emby-icons.json", window.location.origin).href;
+  try {
+    await copyText(libraryUrl);
+    copyLibraryFooterButton.textContent = "已复制图标库";
+    copyLibraryFooterButton.classList.add("is-copied");
+    window.setTimeout(() => {
+      copyLibraryFooterButton.textContent = "点击复制该图标库";
+      copyLibraryFooterButton.classList.remove("is-copied");
+    }, 2200);
+  } catch {
+    window.prompt("复制图标库地址", libraryUrl);
   }
 });
 load();
