@@ -243,18 +243,35 @@ async function fetchRemoteJson() {
     return;
   }
 
+  let token = sessionStorage.getItem("emby-icons-admin-token");
+  if (!token) {
+    token = window.prompt("导入远程 JSON 需要管理员令牌");
+    if (!token?.trim()) return;
+    token = token.trim();
+  }
+
   elements.remoteFetchButton.disabled = true;
   elements.remoteFetchButton.textContent = "获取中...";
   elements.importError.textContent = "";
   try {
-    const response = await fetch(remoteUrl, { cache: "no-store", headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error(`远程请求失败 (${response.status})`);
-    const icons = parseImportedIcons(await response.text());
+    const response = await fetch("/api/import", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url: remoteUrl }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      sessionStorage.removeItem("emby-icons-admin-token");
+      throw new Error(body.error || "管理员令牌无效");
+    }
+    if (!response.ok) throw new Error(body.error || `远程请求失败 (${response.status})`);
+    const icons = parseImportedIcons(JSON.stringify(body.value));
+    sessionStorage.setItem("emby-icons-admin-token", token);
     elements.importEditor.value = `${JSON.stringify({ icons }, null, 2)}\n`;
     elements.importFile.value = "";
     showToast(`已获取 ${icons.length} 个远程图标，请点击导入并保存`);
   } catch (error) {
-    elements.importError.textContent = `${error.message}。远程站点需要允许浏览器跨域访问。`;
+    elements.importError.textContent = error.message;
   } finally {
     elements.remoteFetchButton.disabled = false;
     elements.remoteFetchButton.textContent = "获取远程 JSON";
@@ -513,7 +530,10 @@ async function loadDocument({ confirmDiscard = false } = {}) {
       showToast("KV 中暂无数据，请导入 JSON");
       return;
     }
-    if (!response.ok) throw new Error(`加载失败 (${response.status})`);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.error || `加载失败 (${response.status})`);
+    }
     const next = await response.json();
     const validationError = validDocument(next);
     if (validationError) throw new Error(validationError);

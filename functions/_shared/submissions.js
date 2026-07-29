@@ -22,7 +22,7 @@ function corsHeaders(request, env) {
     "X-Content-Type-Options": "nosniff",
   };
   const origin = request.headers.get("Origin");
-  const allowedOrigin = String(env.APP_ORIGIN || new URL(request.url).origin).trim();
+  const allowedOrigin = new URL(request.url).origin;
   if (origin && origin === allowedOrigin) headers["Access-Control-Allow-Origin"] = origin;
   return headers;
 }

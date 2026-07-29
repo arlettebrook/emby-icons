@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 function adminCorsHeaders(request, env) {
-  const allowedOrigin = String(env.APP_ORIGIN || new URL(request.url).origin).trim();
+  const allowedOrigin = new URL(request.url).origin;
   return {
     ...corsHeaders,
     "Access-Control-Allow-Origin": allowedOrigin,
@@ -118,7 +118,8 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
       },
     });
   } catch (error) {
-    return jsonResponse({ error: error.message }, { status: 500 });
+    const status = /not configured/i.test(error.message || "") ? 503 : 500;
+    return jsonResponse({ error: error.message }, { status });
   }
 }
 
