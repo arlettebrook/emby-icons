@@ -131,6 +131,8 @@ h2 {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: inherit;
+  text-decoration: none;
 }
 
 .brand-mark {
@@ -1387,6 +1389,87 @@ dialog form {
   .toast {
     right: 10px;
     bottom: 10px;
+  }
+}
+
+/* Shared responsive refinements */
+@media (max-width: 680px) {
+  .app-header {
+    position: relative;
+  }
+
+  .header-inner {
+    gap: 15px;
+    padding-top: max(14px, env(safe-area-inset-top));
+    padding-bottom: 14px;
+  }
+
+  .brand-block {
+    width: 100%;
+  }
+
+  .brand-block h1 {
+    font-size: 17px;
+  }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .header-actions .button {
+    min-height: 42px;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .home-stats {
+    gap: 8px;
+    margin-top: 22px;
+  }
+
+  .home-stat {
+    min-width: 0;
+    flex: 1 1 140px;
+    padding: 12px 13px;
+  }
+
+  .home-toolbar {
+    margin-top: 26px;
+  }
+
+  .home-search {
+    width: 100%;
+  }
+
+  .home-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 26px;
+    line-height: 1.5;
+  }
+
+  .icon-card {
+    padding: 12px;
+  }
+
+  .icon-card img {
+    height: 116px;
+  }
+}
+
+@media (max-width: 360px) {
+  .header-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .header-actions .button {
+    width: 100%;
+  }
+
+  .home-stat {
+    flex-basis: 100%;
   }
 }
 

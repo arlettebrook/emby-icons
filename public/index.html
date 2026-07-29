@@ -5,13 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Emby Icons 图标库</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui12" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui13" />
     <style>
-      .home-page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 70px; }
-      .home-header { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
-      .home-header h1 { margin: 0 0 8px; font-size: clamp(32px, 6vw, 58px); letter-spacing: -0.04em; }
+      .home-page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 70px; }
+      .home-header { max-width: 780px; }
+      .home-header h1 { margin: 0 0 8px; font-size: clamp(32px, 6vw, 58px); letter-spacing: -0.04em; line-height: 1.08; }
       .home-header p { max-width: 640px; color: var(--muted); line-height: 1.7; }
-      .home-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
       .home-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
       .home-stat { min-width: 135px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
       .home-stat strong { display: block; color: var(--accent); font-size: 20px; }
@@ -34,28 +33,39 @@
       .icon-card strong { display: block; margin-top: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .icon-card small { display: block; margin-top: 5px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
       .home-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--muted); font-size: 13px; }
-      @media (max-width: 760px) { .home-header { align-items: flex-start; flex-direction: column; } .home-actions { justify-content: flex-start; } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } }
+      @media (max-width: 680px) { .home-page { width: calc(100% - 28px); padding-top: 32px; } .home-header h1 { font-size: clamp(30px, 9vw, 42px); } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } }
+      @media (max-width: 420px) { .home-page { width: calc(100% - 20px); padding-top: 26px; } .home-header h1 { font-size: 29px; } .home-grid { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
-    <main class="home-page">
-      <header class="home-header">
-        <div>
-          <p class="eyebrow">EMBY ICONS / PUBLIC LIBRARY</p>
-          <h1 id="home-name">Emby Icons</h1>
-          <p id="home-description">浏览已发布的 Emby 图标，搜索、复制并使用图标地址。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。</p>
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">E</div>
+          <div>
+            <h1>Emby Icons</h1>
+            <p>Library control center</p>
+          </div>
         </div>
-        <div class="home-actions">
+        <div class="header-actions">
           <a class="button button-primary" href="/submit.html">提交图标</a>
           <a class="button button-secondary" href="/submission.html">查看提交状态</a>
           <button class="button button-secondary" id="copy-library-button" type="button">复制图标库地址</button>
           <a class="button button-secondary" href="/admin.html">管理员登录</a>
         </div>
+      </div>
+    </header>
+    <main class="home-page">
+      <header class="home-header">
+        <div>
+          <p class="eyebrow">EMBY ICONS / PUBLIC LIBRARY</p>
+          <h1>让你的 Emby 图标库保持清晰、有序。</h1>
+          <p>编辑图标资料，实时预览图片。</p>
+        </div>
       </header>
       <section class="home-stats" aria-label="图标库概览">
         <div class="home-stat"><strong id="home-total">0</strong><span>图标总数</span></div>
         <div class="home-stat"><strong>JSON</strong><span>公开格式</span></div>
-        <div class="home-stat"><strong>KV</strong><span>当前来源</span></div>
       </section>
       <section class="home-metadata" aria-label="图标库信息">
         <div class="home-metadata-card"><span>name</span><strong id="home-meta-name">Emby Icons</strong></div>

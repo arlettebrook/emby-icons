@@ -4,8 +4,6 @@ const grid = document.querySelector("#home-grid");
 const empty = document.querySelector("#home-empty");
 const error = document.querySelector("#home-error");
 const updated = document.querySelector("#home-updated");
-const name = document.querySelector("#home-name");
-const description = document.querySelector("#home-description");
 const total = document.querySelector("#home-total");
 const copyLibraryButton = document.querySelector("#copy-library-button");
 const metaName = document.querySelector("#home-meta-name");
@@ -58,12 +56,12 @@ async function load() {
     if (!response.ok) throw new Error(body.error || `加载失败（${response.status}）`);
     if (!Array.isArray(body.icons)) throw new Error("公开图标库格式无效");
     icons = body.icons.filter((icon) => icon && typeof icon.name === "string" && typeof icon.url === "string");
-    name.textContent = typeof body.name === "string" && body.name.trim() ? body.name : "Emby Icons";
-    description.textContent = typeof body.description === "string" && body.description.trim()
+    const documentName = typeof body.name === "string" && body.name.trim() ? body.name : "Emby Icons";
+    const documentDescription = typeof body.description === "string" && body.description.trim()
       ? body.description
-      : "浏览已发布的 Emby 图标，搜索、复制并使用图标地址。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。";
-    metaName.textContent = name.textContent;
-    metaDescription.textContent = description.textContent;
+      : "暂无描述";
+    metaName.textContent = documentName;
+    metaDescription.textContent = documentDescription;
     total.textContent = String(icons.length);
     updated.textContent = `公开图标库 · ${icons.length} 个图标`;
     render();
