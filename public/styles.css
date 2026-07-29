@@ -1041,6 +1041,11 @@ dialog form {
   padding-right: 64px;
 }
 
+/* Keep the password field type stable so Bitwarden does not lose its field anchor. */
+.secret-input input.is-visible {
+  -webkit-text-security: none;
+}
+
 .secret-toggle {
   position: absolute;
   right: 9px;

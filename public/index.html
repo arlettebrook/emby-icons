@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui9" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui10" />
   </head>
   <body>
     <header class="app-header">
@@ -182,7 +182,7 @@
     </dialog>
 
     <dialog id="token-dialog">
-      <form method="post" action="/api/icons" id="token-form" autocomplete="on">
+      <form method="post" action="/api/icons" id="token-form" autocomplete="on" data-form-type="other">
         <div class="dialog-heading">
           <h2>管理员验证</h2>
           <button class="icon-button" id="token-close-button" type="button" aria-label="关闭" title="关闭">×</button>
@@ -194,6 +194,7 @@
             <input
               id="admin-token"
               name="password"
+              data-bwignore="true"
               type="password"
               inputmode="text"
               autocapitalize="off"
@@ -215,6 +216,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js?v=20260729-ui9"></script>
+    <script type="module" src="/app.js?v=20260729-ui10"></script>
   </body>
 </html>

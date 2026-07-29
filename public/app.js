@@ -745,11 +745,10 @@ elements.saveButton.addEventListener("click", () => saveDocument());
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
 
 elements.toggleToken.addEventListener("click", () => {
-  const visible = elements.tokenInput.type === "text";
-  elements.tokenInput.type = visible ? "password" : "text";
-  elements.toggleToken.textContent = visible ? "显示" : "隐藏";
-  elements.toggleToken.setAttribute("aria-label", visible ? "显示令牌" : "隐藏令牌");
-  elements.toggleToken.setAttribute("title", visible ? "显示令牌" : "隐藏令牌");
+  const visible = elements.tokenInput.classList.toggle("is-visible");
+  elements.toggleToken.textContent = visible ? "隐藏" : "显示";
+  elements.toggleToken.setAttribute("aria-label", visible ? "隐藏令牌" : "显示令牌");
+  elements.toggleToken.setAttribute("title", visible ? "隐藏令牌" : "显示令牌");
 });
 
 elements.tokenCancelButton.addEventListener("click", () => elements.tokenDialog.close("cancel"));
