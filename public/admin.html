@@ -8,7 +8,9 @@
     <title>Emby Icons 管理面板</title>
     <link rel="stylesheet" href="/styles.css?v=20260729-ui12" />
     <style>
-      .moderation-panel { width: min(1180px, calc(100% - 40px)); margin: 28px auto 70px; padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 76%); }
+      .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
+      .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
+      .moderation-panel { padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 96%); box-shadow: var(--shadow); }
       .moderation-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
       .moderation-heading h2 { margin: 4px 0 6px; }
       .moderation-heading p:last-child, .moderation-status { color: var(--muted); font-size: 13px; line-height: 1.55; }
@@ -34,7 +36,7 @@
         </div>
         <div class="header-actions">
           <a class="button button-secondary" href="/">普通主页</a>
-          <a class="button button-secondary" href="#moderation-panel">审核队列</a>
+          <button class="button button-secondary" id="moderation-open-button" type="button">审核队列</button>
           <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
           <button class="button button-secondary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制图标库地址</button>
           <button class="button button-secondary" id="export-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>导出 JSON</button>
@@ -145,6 +147,7 @@
         </section>
       </div>
 
+      <dialog class="moderation-dialog" id="moderation-dialog">
       <section class="moderation-panel" id="moderation-panel">
         <div class="moderation-heading">
           <div>
@@ -152,11 +155,12 @@
             <h2>用户提交审核</h2>
             <p>普通用户的提交只有审核通过后才会进入正式图标库。</p>
           </div>
-          <button class="button button-secondary" id="moderation-refresh" type="button">刷新队列</button>
+          <div class="moderation-actions"><button class="button button-secondary" id="moderation-refresh" type="button">刷新队列</button><button class="button button-secondary" id="moderation-close-button" type="button">关闭</button></div>
         </div>
         <p class="moderation-status" id="moderation-status">正在加载待审核提交…</p>
         <div class="moderation-list" id="moderation-list"></div>
       </section>
+      </dialog>
     </main>
 
     <template id="icon-row-template">

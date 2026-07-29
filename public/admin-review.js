@@ -1,6 +1,9 @@
 const list = document.querySelector("#moderation-list");
 const status = document.querySelector("#moderation-status");
 const refreshButton = document.querySelector("#moderation-refresh");
+const dialog = document.querySelector("#moderation-dialog");
+const openButton = document.querySelector("#moderation-open-button");
+const closeButton = document.querySelector("#moderation-close-button");
 
 function adminHeaders() {
   const token = sessionStorage.getItem("emby-icons-admin-token") || "";
@@ -81,4 +84,10 @@ async function loadQueue() {
 }
 
 refreshButton?.addEventListener("click", loadQueue);
+openButton?.addEventListener("click", () => dialog?.showModal());
+closeButton?.addEventListener("click", () => dialog?.close());
+dialog?.addEventListener("click", (event) => {
+  if (event.target === dialog) dialog.close();
+});
+if (window.location.hash === "#moderation") dialog?.showModal();
 loadQueue();

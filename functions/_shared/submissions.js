@@ -10,7 +10,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 120;
 const MAX_URL_LENGTH = 2048;
 const MAX_NOTE_LENGTH = 1000;
-const MAX_SUBMISSIONS_PER_IP_PER_DAY = 5;
+const DEFAULT_SUBMISSIONS_PER_IP_PER_DAY = 20;
 
 function corsHeaders(request, env) {
   const headers = {
@@ -41,6 +41,12 @@ function requireDatabase(request, env) {
 
 function getIp(request) {
   return request.headers.get("CF-Connecting-IP") || "unknown";
+}
+
+function getDailySubmissionLimit(env) {
+  const configured = Number(env.SUBMISSION_DAILY_LIMIT || DEFAULT_SUBMISSIONS_PER_IP_PER_DAY);
+  if (!Number.isFinite(configured)) return DEFAULT_SUBMISSIONS_PER_IP_PER_DAY;
+  return Math.min(Math.max(Math.floor(configured), 1), 100);
 }
 
 async function hashValue(value, env) {
@@ -204,8 +210,8 @@ export async function handleSubmissionCreate(request, env) {
   )
     .bind(ipHash, cutoff)
     .first();
-  if (Number(rate?.count || 0) >= MAX_SUBMISSIONS_PER_IP_PER_DAY) {
-    return jsonResponse(request, env, { error: "Daily submission limit reached" }, { status: 429 });
+  if (Number(rate?.count || 0) >= getDailySubmissionLimit(env)) {
+    return jsonResponse(request, env, { error: "今日提交次数已达上限，请稍后再试。", limit: getDailySubmissionLimit(env) }, { status: 429, headers: { "Retry-After": "86400" } });
   }
 
   const id = crypto.randomUUID();

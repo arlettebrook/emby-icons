@@ -12,6 +12,10 @@
       .home-header h1 { margin: 0 0 8px; font-size: clamp(32px, 6vw, 58px); letter-spacing: -0.04em; }
       .home-header p { max-width: 640px; color: var(--muted); line-height: 1.7; }
       .home-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+      .home-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+      .home-stat { min-width: 135px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
+      .home-stat strong { display: block; color: var(--accent); font-size: 20px; }
+      .home-stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
       .home-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 32px; }
       .home-search { flex: 1; min-width: 0; }
       .home-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -33,15 +37,22 @@
       <header class="home-header">
         <div>
           <p class="eyebrow">EMBY ICONS / PUBLIC LIBRARY</p>
-          <h1>找到合适的图标。</h1>
-          <p>浏览当前已发布的 Emby 图标。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。</p>
+          <h1 id="home-name">Emby Icons</h1>
+          <p id="home-description">浏览已发布的 Emby 图标，搜索、复制并使用图标地址。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。</p>
         </div>
         <div class="home-actions">
           <a class="button button-primary" href="/submit.html">提交图标</a>
           <a class="button button-secondary" href="/submission.html">查看提交状态</a>
+          <a class="button button-secondary" href="/emby-icons.json" target="_blank" rel="noreferrer">原始 JSON</a>
+          <button class="button button-secondary" id="copy-library-button" type="button">复制图标库地址</button>
           <a class="button button-secondary" href="/admin-login.html">管理员登录</a>
         </div>
       </header>
+      <section class="home-stats" aria-label="图标库概览">
+        <div class="home-stat"><strong id="home-total">0</strong><span>图标总数</span></div>
+        <div class="home-stat"><strong>JSON</strong><span>公开格式</span></div>
+        <div class="home-stat"><strong>KV</strong><span>当前来源</span></div>
+      </section>
       <section class="home-toolbar" aria-label="图标搜索">
         <label class="search-field home-search" for="home-search">
           <span aria-hidden="true">⌕</span>

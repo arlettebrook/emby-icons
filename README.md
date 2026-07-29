@@ -103,6 +103,7 @@ npm test
 - Secret `ADMIN_TOKEN`：只给管理员使用，不能发给普通用户。
 - Secret `ADMIN_SESSION_SECRET`：用于签发管理员网页登录会话，建议使用独立随机值。
 - Secret `SUBMISSION_HASH_SECRET`：用于哈希提交访问令牌和 IP，建议使用独立随机值。
+- `SUBMISSION_DAILY_LIMIT`：同一 IP 每 24 小时的提交上限，默认 `20`，可按实际使用量调整，最大 `100`。
 - `TURNSTILE_SECRET_KEY`：生产环境建议配置，并将 `REQUIRE_TURNSTILE` 设为 `true`。
 
 Turnstile 的 Site Key 不是秘密值，配置 `TURNSTILE_SECRET_KEY` 后，将 Site Key 填入 `public/submit.html` 中的 `window.SUBMISSION_SITE_KEY`。普通用户提交成功后会得到一次性访问令牌，令牌只保存在当前浏览器，服务端只保存哈希值。
