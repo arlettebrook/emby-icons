@@ -2088,3 +2088,390 @@ dialog {
     flex-basis: 100%;
   }
 }
+
+/* Glacier Cyan light theme */
+:root {
+  color-scheme: light;
+  --canvas: #f8fbfd;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-soft: rgb(255 255 255 / 86%);
+  --ink: #0f172a;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --line: #dceff5;
+  --line-strong: #c5e4ed;
+  --accent: #7dd3fc;
+  --accent-strong: #38bdf8;
+  --accent-soft: #e8f8fd;
+  --warning: #d97706;
+  --danger: #e11d48;
+  --focus: #22d3ee;
+  --shadow: 0 14px 34px rgb(15 23 42 / 8%);
+}
+
+body {
+  color: var(--ink);
+  background:
+    radial-gradient(62% 46% at 0% 0%, rgb(125 211 252 / 18%), transparent 70%),
+    radial-gradient(48% 38% at 100% 8%, rgb(34 211 238 / 11%), transparent 72%),
+    linear-gradient(135deg, #f8fbfd 0%, #f1f9fc 56%, #f8fbfd 100%);
+}
+
+body::before {
+  background: linear-gradient(120deg, transparent 0 38%, rgb(34 211 238 / 8%) 52%, transparent 68%);
+  mask-image: linear-gradient(to bottom, #fff, transparent 85%);
+}
+
+::selection {
+  background: rgb(34 211 238 / 25%);
+  color: #0f172a;
+}
+
+.app-header {
+  border-bottom-color: var(--line);
+  background: rgb(255 255 255 / 82%);
+  box-shadow: 0 8px 28px rgb(15 23 42 / 7%);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+.brand-mark {
+  border-color: rgb(56 189 248 / 48%);
+  background: linear-gradient(145deg, #7dd3fc, #22d3ee);
+  color: #0f172a;
+  box-shadow: 0 0 0 4px rgb(125 211 252 / 15%), 0 8px 22px rgb(14 165 233 / 16%);
+}
+
+.brand-block p,
+.status-inner,
+.document-state,
+.field > span:first-child {
+  color: var(--muted);
+}
+
+.button {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 90%);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: #f0fbfe;
+  color: #0f172a;
+  box-shadow: 0 8px 20px rgb(14 165 233 / 12%);
+}
+
+.button-primary {
+  border-color: #38bdf8;
+  background: linear-gradient(135deg, #7dd3fc, #22d3ee);
+  color: #0f172a;
+  box-shadow: 0 8px 20px rgb(14 165 233 / 16%);
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: #0ea5e9;
+  background: linear-gradient(135deg, #93dcfd, #67e8f9);
+  color: #0f172a;
+}
+
+.status-band {
+  border-bottom-color: var(--line);
+  background: rgb(240 249 252 / 88%);
+}
+
+.status-dot,
+.status-dot.online,
+.json-status-dot {
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 4px rgb(56 189 248 / 14%), 0 0 14px rgb(34 211 238 / 32%);
+}
+
+.status-dot.error {
+  background: var(--danger);
+  box-shadow: 0 0 12px rgb(225 29 72 / 28%);
+}
+
+.document-state {
+  border-color: var(--line-strong);
+  background: #ffffff;
+}
+
+.workspace-intro h2,
+.overview-stat strong,
+.section-heading h2 {
+  color: #0f172a;
+}
+
+.eyebrow,
+.tab.is-active,
+.tab.is-active .tab-icon,
+.home-stat strong {
+  color: #0ea5e9;
+}
+
+.overview-stats {
+  border-color: var(--line-strong);
+  background: rgb(220 239 245 / 72%);
+  box-shadow: var(--shadow);
+}
+
+.overview-stat {
+  background: rgb(255 255 255 / 92%);
+}
+
+.tabs {
+  border-bottom-color: var(--line);
+}
+
+.tab {
+  color: var(--muted);
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.field input,
+.field textarea,
+.sort-field select,
+.search-field {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 88%);
+  color: var(--ink);
+  box-shadow: inset 0 1px rgb(255 255 255 / 80%);
+}
+
+.field input:hover,
+.field textarea:hover,
+.sort-field select:hover,
+.search-field:hover {
+  border-color: var(--accent-strong);
+  background: #ffffff;
+}
+
+.field input:focus,
+.field textarea:focus,
+.sort-field select:focus,
+.search-field:focus-within {
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 16%), 0 8px 18px rgb(14 165 233 / 8%);
+}
+
+.search-field input,
+.search-field input::placeholder {
+  color: var(--ink);
+}
+
+.search-field input::placeholder {
+  color: var(--muted);
+}
+
+.section-heading {
+  border-top-color: var(--line);
+}
+
+#icon-count,
+.row-index {
+  border-color: rgb(56 189 248 / 40%);
+  background: #e8f8fd;
+  color: #0369a1;
+  text-shadow: none;
+  box-shadow: none;
+}
+
+.icon-row,
+.empty-state {
+  border-color: var(--line);
+  background: rgb(255 255 255 / 90%);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 7%);
+}
+
+.icon-row:hover {
+  border-color: rgb(56 189 248 / 62%);
+  box-shadow: 0 14px 32px rgb(14 165 233 / 13%);
+}
+
+.icon-preview,
+.icon-card .home-icon-preview {
+  border-color: var(--line-strong);
+  background: linear-gradient(145deg, #effaff, #dff5fa);
+}
+
+.icon-preview:hover,
+.icon-preview:focus-visible {
+  border-color: var(--accent-strong);
+  background: #e8f8fd;
+  box-shadow: 0 8px 22px rgb(14 165 233 / 14%);
+}
+
+.icon-button {
+  border-color: var(--line-strong);
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.icon-button:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: #e8f8fd;
+  color: #0ea5e9;
+}
+
+.empty-icon {
+  border-color: rgb(56 189 248 / 44%);
+  background: var(--accent-soft);
+  color: #0ea5e9;
+}
+
+#json-editor {
+  border-color: var(--line-strong);
+  background: #f1f9fc;
+  color: #0f172a;
+  box-shadow: inset 0 1px #ffffff, var(--shadow);
+}
+
+dialog {
+  border-color: var(--line-strong);
+  background: rgb(255 255 255 / 97%);
+  color: var(--ink);
+  box-shadow: 0 26px 80px rgb(15 23 42 / 18%);
+}
+
+dialog::backdrop {
+  background: rgb(15 23 42 / 28%) !important;
+  backdrop-filter: blur(5px);
+}
+
+.toast {
+  border-color: rgb(56 189 248 / 52%);
+  background: rgb(255 255 255 / 98%);
+  color: #0f172a;
+  box-shadow: 0 14px 34px rgb(15 23 42 / 14%);
+}
+
+.home-stat,
+.home-metadata-card,
+.icon-card,
+.login-card,
+.submission-card,
+.review-item,
+.moderation-panel,
+.telegram-settings {
+  border-color: var(--line);
+  background: rgb(255 255 255 / 88%);
+  box-shadow: var(--shadow);
+}
+
+.home-header h1 {
+  color: #0f172a !important;
+}
+
+.home-header .eyebrow {
+  color: #0ea5e9 !important;
+}
+
+.home-error,
+.standalone-result.error {
+  background: rgb(225 29 72 / 7%) !important;
+}
+
+.moderation-dialog::backdrop,
+.github-proxy-dialog::backdrop {
+  background: rgb(15 23 42 / 28%) !important;
+}
+
+.moderation-item,
+.review-item,
+.submission-card {
+  background: #ffffff !important;
+}
+
+.moderation-item img,
+.review-item img {
+  background: #effaff !important;
+}
+
+.admin-login-card,
+.github-proxy-panel {
+  background: #ffffff !important;
+}
+
+.conflict-banner {
+  border-color: rgb(217 119 6 / 35%);
+  background: rgb(255 247 237 / 96%);
+  color: #92400e;
+  box-shadow: 0 12px 35px rgb(15 23 42 / 7%);
+}
+
+.conflict-copy span,
+.conflict-close {
+  color: #a16207;
+}
+
+.button-conflict {
+  border-color: rgb(217 119 6 / 35%);
+  background: #fffaf0;
+  color: #92400e;
+}
+
+.button-conflict-force {
+  border-color: rgb(225 29 72 / 28%);
+  background: #fff1f2;
+  color: #be123c;
+}
+
+body.has-unsaved-changes .status-band {
+  background: linear-gradient(90deg, rgb(254 243 199 / 72%), rgb(240 249 252 / 90%) 50%, rgb(254 243 199 / 72%));
+}
+
+/* Fine visual tuning */
+.button-primary {
+  border-color: #bae6fd;
+  background: #e0f2fe;
+  color: #0369a1;
+  box-shadow: 0 1px 2px rgb(14 165 233 / 10%);
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: #7dd3fc;
+  background: #bae6fd;
+  color: #0f172a;
+  box-shadow: 0 4px 12px rgb(14 165 233 / 14%);
+}
+
+.button-primary:active:not(:disabled) {
+  background: #a5defa;
+  box-shadow: inset 0 1px 2px rgb(14 165 233 / 10%);
+}
+
+body.has-unsaved-changes #save-button:not(:disabled) {
+  box-shadow: 0 0 0 3px rgb(125 211 252 / 24%), 0 4px 12px rgb(14 165 233 / 12%);
+}
+
+.row-index {
+  border-color: #dceff5;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #64748b;
+  font-weight: 700;
+  text-shadow: none;
+  box-shadow: none;
+}
+
+.row-index::before {
+  color: #94a3b8;
+}
+
+.icon-row:hover .row-index,
+.icon-row:focus-within .row-index {
+  border-color: #bae6fd;
+  background: #effaff;
+  color: #0369a1;
+  box-shadow: 0 2px 6px rgb(14 165 233 / 10%);
+}
+
+.icon-row:hover .row-index::before,
+.icon-row:focus-within .row-index::before {
+  color: #0ea5e9;
+}
