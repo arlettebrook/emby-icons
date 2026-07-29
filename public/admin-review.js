@@ -65,7 +65,9 @@ async function saveTelegramSettings() {
     telegramTokenNote.textContent = result.configured
       ? "当前已配置 Bot Token；留空保存时不会覆盖它。"
       : "Token 会加密保存在服务端，不会回显到页面。";
-    setTelegramStatus(result.enabled ? "通知已开启，保存成功" : "通知已关闭，保存成功", "success");
+    if (result.warning) setTelegramStatus(result.warning, "error");
+    else if (result.enabled && !result.webhookConfigured) setTelegramStatus("配置已保存，但 Webhook 尚未就绪", "error");
+    else setTelegramStatus(result.enabled ? "通知已开启，保存成功" : "通知已关闭，保存成功", "success");
   } catch (error) {
     setTelegramStatus(error.message, "error");
   } finally {
