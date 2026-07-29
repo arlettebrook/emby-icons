@@ -1197,7 +1197,7 @@ dialog form {
   }
 
   .icon-row {
-    grid-template-columns: 42px minmax(0, 1fr) 76px;
+    grid-template-columns: 34px 52px minmax(0, 1fr);
     padding: 11px;
     gap: 10px;
   }
@@ -1210,6 +1210,10 @@ dialog form {
   .icon-row .url-field,
   .icon-row .row-actions {
     grid-column: 1 / -1;
+  }
+
+  .icon-row .compact-field:not(.url-field) {
+    min-width: 0;
   }
 
   .icon-row .row-actions {
@@ -1253,6 +1257,7 @@ dialog form {
   .conflict-banner {
     align-items: stretch;
     flex-wrap: wrap;
+    padding-right: 48px;
   }
 
   .conflict-copy {
@@ -1318,7 +1323,7 @@ dialog form {
   }
 
   .icon-row {
-    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-columns: 30px 46px minmax(0, 1fr);
   }
 
   .icon-row .url-field,
