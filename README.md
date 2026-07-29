@@ -88,6 +88,36 @@ git push origin master
 npm test
 ```
 
+## 普通用户提交图标
+
+普通用户通过 `/submit.html` 提交图标名称和 HTTPS URL。提交内容只会写入 D1 的待审核队列，不会直接修改 `EMBY_ICONS`；管理员在 `/review.html` 审核通过后，系统才会把图标追加到正式 KV 文档。
+
+需要在 Cloudflare Pages 中配置以下绑定和变量：
+
+- D1 database binding：变量名必须是 `DB`，先执行 `migrations/0001_submissions.sql`。
+- KV binding：变量名仍是 `EMBY_ICONS`。
+- Secret `ADMIN_TOKEN`：只给管理员使用，不能发给普通用户。
+- Secret `SUBMISSION_HASH_SECRET`：用于哈希提交访问令牌和 IP，建议使用独立随机值。
+- `APP_ORIGIN`：站点完整来源，例如 `https://icons.example.com`，用于限制跨域请求。
+- `TURNSTILE_SECRET_KEY`：生产环境建议配置，并将 `REQUIRE_TURNSTILE` 设为 `true`。
+
+Turnstile 的 Site Key 不是秘密值，配置 `TURNSTILE_SECRET_KEY` 后，将 Site Key 填入 `public/submit.html` 中的 `window.SUBMISSION_SITE_KEY`。普通用户提交成功后会得到一次性访问令牌，令牌只保存在当前浏览器，服务端只保存哈希值。
+
+本地开发可以使用本地 D1：
+
+```powershell
+npm run db:migrate:local
+npm run dev
+```
+
+首次创建远程 D1 后，使用 Cloudflare 的数据库名称执行迁移：
+
+```powershell
+npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_submissions.sql
+```
+
+审核通过前，普通用户不能修改正式图标库；管理员整份 JSON 保存接口仍然只接受 `ADMIN_TOKEN`。系统会在管理员保存或审核发布前，将旧版本写入 D1 的 `document_versions` 表，并在 `audit_logs` 中记录操作。
+
 ## 原始导入地址
 
 - <https://raw.githubusercontent.com/arlettebrook/emby-icons/refs/heads/main/emby-icons.json>

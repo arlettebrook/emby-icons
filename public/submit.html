@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>提交 Emby 图标</title>
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui12" />
+    <style>
+      .standalone { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0; }
+      .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 88%); box-shadow: var(--shadow); }
+      .standalone-card h1 { margin: 0 0 10px; }
+      .standalone-card p { color: var(--muted); line-height: 1.6; }
+      .standalone-form { display: grid; gap: 16px; margin-top: 24px; }
+      .standalone-form textarea { min-height: 100px; resize: vertical; }
+      .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; word-break: break-word; }
+      .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
+      .standalone-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+      .turnstile-box { min-height: 65px; }
+    </style>
+  </head>
+  <body>
+    <main class="standalone">
+      <section class="standalone-card">
+        <p class="eyebrow">EMBY ICONS / COMMUNITY SUBMISSION</p>
+        <h1>提交一个图标</h1>
+        <p>提交内容会进入审核队列。审核通过后才会出现在公开图标库中。请使用图标的 HTTPS 直链。</p>
+        <form class="standalone-form" id="submission-form">
+          <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" required autocomplete="off" /></label>
+          <label class="field"><span>图标 URL</span><input id="url" name="url" type="url" maxlength="2048" placeholder="https://example.com/icon.png" required autocomplete="url" /></label>
+          <label class="field"><span>补充说明（可选）</span><textarea id="note" name="note" maxlength="1000"></textarea></label>
+          <div class="turnstile-box" id="turnstile-container"></div>
+          <button class="button button-primary" id="submit-button" type="submit">提交审核</button>
+        </form>
+        <div class="standalone-result" id="result" hidden></div>
+        <div class="standalone-links"><a href="/">返回管理页面</a><a href="/review.html">管理员审核</a></div>
+      </section>
+    </main>
+    <script>
+      // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
+      window.SUBMISSION_SITE_KEY = "";
+    </script>
+    <script type="module" src="/submit.js"></script>
+  </body>
+</html>

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.js",
-    "dev": "wrangler pages dev public --kv EMBY_ICONS --persist-to .wrangler/state",
+    "dev": "wrangler pages dev public --kv EMBY_ICONS --d1 DB=emby-icons-local --persist-to .wrangler/state",
+    "db:migrate:local": "wrangler d1 migrations apply emby-icons-local --local --persist-to .wrangler/state",
     "test": "node --test"
   },
   "devDependencies": {
