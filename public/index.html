@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui7" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui8" />
   </head>
   <body>
     <header class="app-header">
@@ -138,7 +138,10 @@
         </label>
         <label class="field compact-field url-field">
           <span>图片地址</span>
-          <input type="url" data-field="url" autocomplete="off" />
+          <div class="url-control">
+            <input type="url" data-field="url" autocomplete="url" />
+            <button class="icon-button copy-url" type="button" title="复制图片地址" aria-label="复制图片地址">⧉</button>
+          </div>
         </label>
         <div class="row-actions" aria-label="图标操作">
           <button class="icon-button move-up" type="button" title="上移" aria-label="上移">↑</button>
@@ -179,7 +182,7 @@
     </dialog>
 
     <dialog id="token-dialog">
-      <form method="dialog" id="token-form" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+      <form method="post" action="/api/icons" id="token-form" autocomplete="on">
         <div class="dialog-heading">
           <h2>管理员验证</h2>
           <button class="icon-button" id="token-close-button" type="button" aria-label="关闭" title="关闭">×</button>
@@ -190,15 +193,13 @@
           <span class="secret-input">
             <input
               id="admin-token"
+              name="password"
               type="password"
               inputmode="text"
               autocapitalize="off"
               autocorrect="off"
               spellcheck="false"
-              autocomplete="off"
-              data-1p-ignore="true"
-              data-bwignore="true"
-              data-lpignore="true"
+              autocomplete="current-password"
               aria-describedby="token-help"
               required
             />
@@ -214,6 +215,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js?v=20260729-ui7"></script>
+    <script type="module" src="/app.js?v=20260729-ui8"></script>
   </body>
 </html>

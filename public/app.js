@@ -68,6 +68,24 @@ let renderFrame = 0;
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const helper = document.createElement("textarea");
+  helper.value = value;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.opacity = "0";
+  document.body.append(helper);
+  helper.select();
+  const copied = document.execCommand("copy");
+  helper.remove();
+  if (!copied) throw new Error("复制失败，请手动选择地址复制");
+}
+
 function rebuildSearchIndex() {
   searchIndex = documentData.icons.map((icon) => `${icon.name} ${icon.url}`.toLocaleLowerCase());
 }
@@ -261,7 +279,7 @@ function exportDocument() {
 
 async function copyDocument() {
   try {
-    await navigator.clipboard.writeText(getSerializedDocument());
+    await copyText(getSerializedDocument());
     showToast("JSON 已复制到剪贴板");
   } catch (error) {
     showToast(error.message || "复制失败，请检查浏览器权限");
@@ -271,7 +289,7 @@ async function copyDocument() {
 async function copyPublicConfig() {
   try {
     const publicUrl = new URL("/emby-icons.json", window.location.origin).href;
-    await navigator.clipboard.writeText(publicUrl);
+    await copyText(publicUrl);
     showToast("图标库地址已复制到剪贴板");
   } catch (error) {
     showToast(error.message || "复制失败，请检查浏览器权限");
@@ -290,6 +308,7 @@ function updateSaveAvailability() {
 
 function setDirty(value) {
   dirty = value;
+  document.body.classList.toggle("has-unsaved-changes", value);
   elements.dirtyState.textContent = value ? "有未保存修改" : "已同步";
   elements.dirtyState.classList.toggle("dirty", value);
   updateSaveAvailability();
@@ -627,6 +646,18 @@ elements.iconList.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   const index = Number(button.closest(".icon-row").dataset.index);
+
+  if (button.classList.contains("copy-url")) {
+    const url = documentData.icons[index]?.url?.trim();
+    if (!url) {
+      showToast("请先填写图片地址");
+      return;
+    }
+    copyText(url)
+      .then(() => showToast("图片地址已复制到剪贴板"))
+      .catch((error) => showToast(error.message || "复制失败，请手动选择地址复制"));
+    return;
+  }
 
   if (button.classList.contains("delete-icon")) {
     const label = documentData.icons[index].name || `第 ${index + 1} 项`;
