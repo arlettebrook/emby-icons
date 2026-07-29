@@ -4,6 +4,12 @@ const refreshButton = document.querySelector("#moderation-refresh");
 const dialog = document.querySelector("#moderation-dialog");
 const openButton = document.querySelector("#moderation-open-button");
 const closeButton = document.querySelector("#moderation-close-button");
+const telegramEnabled = document.querySelector("#telegram-enabled");
+const telegramBotToken = document.querySelector("#telegram-bot-token");
+const telegramChatId = document.querySelector("#telegram-chat-id");
+const telegramTokenNote = document.querySelector("#telegram-token-note");
+const telegramStatus = document.querySelector("#telegram-settings-status");
+const telegramSaveButton = document.querySelector("#telegram-save-button");
 
 function adminHeaders() {
   const token = sessionStorage.getItem("emby-icons-admin-token") || "";
@@ -13,6 +19,58 @@ function adminHeaders() {
 function setStatus(message, error = false) {
   status.textContent = message;
   status.style.color = error ? "var(--danger)" : "";
+}
+
+function setTelegramStatus(message, type = "") {
+  telegramStatus.textContent = message;
+  telegramStatus.className = `telegram-settings-status${type ? ` is-${type}` : ""}`;
+}
+
+async function loadTelegramSettings() {
+  try {
+    const response = await fetch("/api/admin/telegram", { headers: adminHeaders(), cache: "no-store" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `加载 Telegram 配置失败（${response.status}）`);
+    telegramEnabled.checked = body.enabled === true;
+    telegramChatId.value = body.chatId || "";
+    telegramBotToken.value = "";
+    telegramBotToken.placeholder = body.configured ? "已配置，留空则保持当前 Token" : "粘贴 Bot Token";
+    telegramTokenNote.textContent = body.configured
+      ? "当前已配置 Bot Token；留空保存时不会覆盖它。"
+      : "Token 会加密保存在服务端，不会回显到页面。";
+    setTelegramStatus(body.configured ? "Bot Token 已配置" : "尚未配置 Bot Token", body.configured ? "success" : "");
+  } catch (error) {
+    setTelegramStatus(error.message, "error");
+  }
+}
+
+async function saveTelegramSettings() {
+  telegramSaveButton.disabled = true;
+  setTelegramStatus("正在保存…");
+  const body = {
+    enabled: telegramEnabled.checked,
+    chatId: telegramChatId.value.trim(),
+  };
+  if (telegramBotToken.value.trim()) body.botToken = telegramBotToken.value.trim();
+  try {
+    const response = await fetch("/api/admin/telegram", {
+      method: "PUT",
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `保存 Telegram 配置失败（${response.status}）`);
+    telegramBotToken.value = "";
+    telegramBotToken.placeholder = result.configured ? "已配置，留空则保持当前 Token" : "粘贴 Bot Token";
+    telegramTokenNote.textContent = result.configured
+      ? "当前已配置 Bot Token；留空保存时不会覆盖它。"
+      : "Token 会加密保存在服务端，不会回显到页面。";
+    setTelegramStatus(result.enabled ? "通知已开启，保存成功" : "通知已关闭，保存成功", "success");
+  } catch (error) {
+    setTelegramStatus(error.message, "error");
+  } finally {
+    telegramSaveButton.disabled = false;
+  }
 }
 
 function makeItem(item) {
@@ -89,5 +147,7 @@ closeButton?.addEventListener("click", () => dialog?.close());
 dialog?.addEventListener("click", (event) => {
   if (event.target === dialog) dialog.close();
 });
+telegramSaveButton?.addEventListener("click", saveTelegramSettings);
 if (window.location.hash === "#moderation") dialog?.showModal();
 loadQueue();
+loadTelegramSettings();

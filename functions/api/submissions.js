@@ -3,8 +3,8 @@ import {
   handleSubmissionOptions,
 } from "../_shared/submissions.js";
 
-export function onRequestPost({ request, env }) {
-  return handleSubmissionCreate(request, env);
+export function onRequestPost({ request, env, waitUntil }) {
+  return handleSubmissionCreate(request, env, waitUntil);
 }
 
 export function onRequestOptions({ request, env }) {

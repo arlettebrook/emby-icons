@@ -5,6 +5,7 @@ import {
   writeAuditLog,
 } from "./icons.js";
 import { hasAdminAccess } from "./admin.js";
+import { queueSubmissionNotification } from "./telegram.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 120;
@@ -187,7 +188,7 @@ async function releasePublicationLock(env, owner) {
   await env.DB.prepare("DELETE FROM document_publish_lock WHERE lock_name = 'canonical' AND owner = ?1").bind(owner).run();
 }
 
-export async function handleSubmissionCreate(request, env) {
+export async function handleSubmissionCreate(request, env, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
 
@@ -232,6 +233,12 @@ export async function handleSubmissionCreate(request, env) {
     targetId: id,
     details: { name: validation.value.name, url: validation.value.url },
   });
+  await queueSubmissionNotification(env, {
+    id,
+    name: validation.value.name,
+    url: validation.value.url,
+    note: validation.value.note,
+  }, waitUntil);
 
   return jsonResponse(
     request,
