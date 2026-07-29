@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Emby Icons 图标库</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui17" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui18" />
     <style>
       .home-page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 70px; }
       .home-header { max-width: 780px; }
@@ -49,7 +49,10 @@
         .home-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
         .home-stat { min-width: 0; padding: 12px; }
         .home-metadata { gap: 8px; }
-        .home-toolbar { gap: 8px; margin-top: 26px; }
+        .home-toolbar { width: 100%; min-width: 0; gap: 8px; margin-top: 26px; overflow: visible; }
+        .home-search { width: 100%; min-width: 0; height: 44px; flex: 0 0 44px; box-sizing: border-box; }
+        .home-search input { min-width: 0; width: 100%; font-size: 16px; }
+        .home-count { display: block; width: 100%; }
         .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
         .icon-card { padding: 10px; }
         .icon-card .home-icon-preview, .icon-card img { height: 112px; }
@@ -57,6 +60,7 @@
       }
       @media (max-width: 420px) {
         .home-page { width: calc(100% - 20px); padding-top: 24px; }
+        .home-search { height: 42px; flex-basis: 42px; padding-inline: 10px; }
         .home-stats { grid-template-columns: 1fr 1fr; }
         .home-stat strong { font-size: 18px; }
         .home-stat span { font-size: 11px; }
