@@ -1,7 +1,5 @@
 # Emby Icons
 
-Database retention and automatic cleanup instructions are in [D1_CLEANUP.md](D1_CLEANUP.md).
-
 基于 Cloudflare Pages、Pages Functions 与 KV 的 Emby 图标配置管理面板。公开地址返回标准 `emby-icons.json`，管理页面支持结构化编辑、原始 JSON 编辑、图片预览、排序和校验。
 
 ## 本地开发
