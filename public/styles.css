@@ -609,9 +609,17 @@ body.has-unsaved-changes #save-button:not(:disabled) {
 }
 
 #icon-count {
-  color: var(--faint);
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid rgb(98 224 176 / 30%);
+  border-radius: 6px;
+  background: rgb(98 224 176 / 10%);
+  color: #a9f4d5;
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .list-tools {
@@ -730,10 +738,38 @@ body.has-unsaved-changes #save-button:not(:disabled) {
 }
 
 .row-index {
-  color: var(--faint);
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(98 224 176 / 36%);
+  border-radius: 7px;
+  background: linear-gradient(145deg, rgb(98 224 176 / 18%), rgb(31 79 65 / 45%));
+  color: #baffdf;
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
   text-align: center;
+  text-shadow: 0 0 12px rgb(98 224 176 / 36%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 8%), 0 0 13px rgb(98 224 176 / 6%);
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.row-index::before {
+  content: "#";
+  margin-right: 1px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.icon-row:hover .row-index,
+.icon-row:focus-within .row-index {
+  border-color: rgb(98 224 176 / 72%);
+  background: linear-gradient(145deg, rgb(98 224 176 / 28%), rgb(31 79 65 / 62%));
+  color: #e1fff1;
+  box-shadow: 0 0 17px rgb(98 224 176 / 18%);
 }
 
 .icon-preview {
@@ -1207,6 +1243,12 @@ dialog form {
     height: 42px;
   }
 
+  .row-index {
+    width: 34px;
+    height: 27px;
+    font-size: 10px;
+  }
+
   .icon-row .url-field,
   .icon-row .row-actions {
     grid-column: 1 / -1;
@@ -1324,6 +1366,12 @@ dialog form {
 
   .icon-row {
     grid-template-columns: 30px 46px minmax(0, 1fr);
+  }
+
+  .row-index {
+    width: 30px;
+    height: 26px;
+    font-size: 10px;
   }
 
   .icon-row .url-field,
