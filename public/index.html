@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Emby Icons 图标库</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui15" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui17" />
     <style>
       .home-page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 70px; }
       .home-header { max-width: 780px; }
@@ -41,6 +41,31 @@
       .home-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--muted); font-size: 13px; }
       @media (max-width: 680px) { .home-page { width: calc(100% - 28px); padding-top: 32px; } .home-header h1 { font-size: clamp(30px, 9vw, 42px); } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } .icon-card .home-icon-preview, .icon-card img { height: 116px; } }
       @media (max-width: 420px) { .home-page { width: calc(100% - 20px); padding-top: 26px; } .home-header h1 { font-size: 29px; } .home-grid { grid-template-columns: 1fr; } }
+    </style>
+    <style>
+      @media (max-width: 680px) {
+        .home-page { width: calc(100% - 28px); padding-top: 28px; padding-bottom: 48px; }
+        .home-header h1 { font-size: clamp(29px, 8.8vw, 40px); }
+        .home-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .home-stat { min-width: 0; padding: 12px; }
+        .home-metadata { gap: 8px; }
+        .home-toolbar { gap: 8px; margin-top: 26px; }
+        .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
+        .icon-card { padding: 10px; }
+        .icon-card .home-icon-preview, .icon-card img { height: 112px; }
+        .home-footer { align-items: flex-start; flex-direction: column; gap: 6px; margin-top: 26px; }
+      }
+      @media (max-width: 420px) {
+        .home-page { width: calc(100% - 20px); padding-top: 24px; }
+        .home-stats { grid-template-columns: 1fr 1fr; }
+        .home-stat strong { font-size: 18px; }
+        .home-stat span { font-size: 11px; }
+        .home-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+        .icon-card { padding: 9px; }
+        .icon-card .home-icon-preview, .icon-card img { height: 104px; }
+        .icon-card strong { margin-top: 9px; font-size: 13px; }
+        .home-copy-button { width: 30px; height: 30px; flex-basis: 30px; }
+      }
     </style>
   </head>
   <body>

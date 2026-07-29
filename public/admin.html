@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui15" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui17" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -59,6 +59,8 @@
       .admin-login-error { min-height: 20px; color: var(--danger); font-size: 13px; }
       .admin-login-footer { display: flex; justify-content: space-between; margin-top: 20px; font-size: 13px; }
       @media (max-width: 700px) { .moderation-heading { align-items: flex-start; flex-direction: column; } .moderation-item { grid-template-columns: 52px minmax(0, 1fr); } .moderation-item img { width: 48px; height: 48px; } .moderation-actions { grid-column: 1 / -1; } .telegram-settings-heading, .telegram-settings-footer { align-items: stretch; flex-direction: column; } .telegram-settings-grid { grid-template-columns: 1fr; } .telegram-settings-footer .button { width: 100%; } }
+      @media (max-width: 700px) { .moderation-dialog { width: calc(100% - 20px); max-height: calc(100vh - 20px); } .moderation-panel { padding: 17px; } .moderation-heading { gap: 14px; } .moderation-actions { width: 100%; flex-wrap: wrap; } .moderation-actions .button { flex: 1 1 130px; } .moderation-item { gap: 10px; padding: 11px; } .telegram-settings { padding-inline: 12px; } .telegram-settings-summary { gap: 10px; padding-block: 14px; } .telegram-settings-badge { display: none; } .github-proxy-panel { padding: 18px; } }
+      @media (max-width: 420px) { .moderation-panel { padding: 14px; } .moderation-item { grid-template-columns: 44px minmax(0, 1fr); } .moderation-item img { width: 42px; height: 42px; } .moderation-actions .button { flex-basis: 100%; } .telegram-settings { margin-top: 14px; padding-inline: 10px; } .github-proxy-dialog { width: calc(100% - 16px); } .github-proxy-panel { padding: 15px; } }
     </style>
   </head>
   <body>
