@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark" />
+    <title>Emby Icons 管理员面板</title>
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui12" />
+    <style>
+      .admin-page { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 52px 0; }
+      .admin-page h1 { margin: 0 0 10px; }
+      .admin-lead { max-width: 650px; color: var(--muted); line-height: 1.7; }
+      .admin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 30px; }
+      .admin-card { display: flex; min-height: 170px; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px; border: 1px solid var(--line-strong); border-radius: 13px; background: rgb(11 26 22 / 88%); box-shadow: var(--shadow); }
+      .admin-card h2 { margin: 0 0 7px; font-size: 18px; }
+      .admin-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+      .admin-footer { display: flex; justify-content: space-between; gap: 14px; margin-top: 28px; color: var(--muted); font-size: 13px; }
+      @media (max-width: 760px) { .admin-grid { grid-template-columns: 1fr; } .admin-footer { flex-direction: column; } }
+    </style>
+  </head>
+  <body>
+    <main class="admin-page">
+      <p class="eyebrow">EMBY ICONS / ADMINISTRATION</p>
+      <h1>管理员面板</h1>
+      <p class="admin-lead">管理员功能集中在这里。普通用户只能通过独立的提交页面提交图标，不能访问正式数据编辑和审核操作。</p>
+      <section class="admin-grid" aria-label="管理员功能">
+        <article class="admin-card">
+          <div><h2>正式图标库</h2><p>编辑完整 JSON、导入远程图标库、排序和保存正式版本。</p></div>
+          <a class="button button-primary" href="/">打开正式库编辑</a>
+        </article>
+        <article class="admin-card">
+          <div><h2>审核队列</h2><p>查看普通用户提交的 URL，审核通过后才会发布到公开图标库。</p></div>
+          <a class="button button-primary" href="/review.html">打开审核队列</a>
+        </article>
+        <article class="admin-card">
+          <div><h2>公开数据</h2><p>查看当前对外发布的 JSON 内容，确认审核结果。</p></div>
+          <a class="button button-secondary" href="/emby-icons.json" target="_blank" rel="noreferrer">打开公开 JSON</a>
+        </article>
+      </section>
+      <div class="admin-footer"><span>管理员令牌只用于管理员请求，不要提供给普通用户。</span><a href="/submit.html">查看普通用户提交页</a></div>
+    </main>
+  </body>
+</html>

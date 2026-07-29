@@ -74,8 +74,10 @@ git push origin master
 
 ## 地址
 
-- 管理面板：`https://<你的域名>/`
+- 管理员面板：`https://<你的域名>/admin.html`
+- 正式库编辑器：`https://<你的域名>/`
 - 普通用户提交：`https://<你的域名>/submit.html`
+- 提交状态：`https://<你的域名>/submission.html?id=<提交编号>`
 - 管理员审核：`https://<你的域名>/review.html`
 - 公开配置：`https://<你的域名>/emby-icons.json`
 - 管理 API：`GET/PUT https://<你的域名>/api/icons`

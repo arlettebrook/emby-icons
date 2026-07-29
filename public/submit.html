@@ -16,6 +16,8 @@
       .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; word-break: break-word; }
       .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
       .standalone-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+      .credential-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+      .credential-note { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; }
       .turnstile-box { min-height: 65px; }
     </style>
   </head>
@@ -33,7 +35,7 @@
           <button class="button button-primary" id="submit-button" type="submit">提交审核</button>
         </form>
         <div class="standalone-result" id="result" hidden></div>
-        <div class="standalone-links"><a href="/">返回管理页面</a><a href="/review.html">管理员审核</a></div>
+        <div class="standalone-links"><a href="/emby-icons.json">查看公开图标库</a><a href="/submit.html">再次提交</a></div>
       </section>
     </main>
     <script>

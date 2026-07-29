@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>查看提交状态</title>
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui12" />
+    <style>
+      .standalone { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0; }
+      .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 88%); box-shadow: var(--shadow); }
+      .standalone-card h1 { margin: 0 0 10px; }
+      .standalone-card p { color: var(--muted); line-height: 1.6; }
+      .standalone-form { display: grid; gap: 16px; margin-top: 24px; }
+      .standalone-form textarea { min-height: 100px; resize: vertical; }
+      .submission-info { display: grid; gap: 9px; margin-top: 22px; padding: 16px; border-radius: 9px; background: var(--accent-soft); }
+      .submission-info strong { color: var(--accent); }
+      .submission-info span { overflow-wrap: anywhere; }
+      .submission-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+      .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; }
+      .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
+      .standalone-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+    </style>
+  </head>
+  <body>
+    <main class="standalone">
+      <section class="standalone-card">
+        <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
+        <h1>查看提交状态</h1>
+        <p>访问凭证只允许你查看、修改或撤回自己的待审核提交。管理员不会通过这个凭证获得权限。</p>
+        <form class="standalone-form" id="lookup-form">
+          <label class="field"><span>提交编号</span><input id="submission-id" required autocomplete="off" /></label>
+          <label class="field"><span>访问凭证</span><input id="access-token" type="password" required autocomplete="off" /></label>
+          <button class="button button-primary" type="submit">查询提交</button>
+        </form>
+        <div class="submission-info" id="submission-info" hidden></div>
+        <form class="standalone-form" id="edit-form" hidden>
+          <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
+          <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
+          <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
+          <div class="submission-actions">
+            <button class="button button-primary" type="submit">保存修改</button>
+            <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
+          </div>
+        </form>
+        <div class="standalone-result" id="result" hidden></div>
+        <div class="standalone-links"><a href="/submit.html">提交新的图标</a><a href="/emby-icons.json">查看公开图标库</a></div>
+      </section>
+    </main>
+    <script type="module" src="/submission.js"></script>
+  </body>
+</html>

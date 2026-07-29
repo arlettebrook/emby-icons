@@ -9,6 +9,39 @@ function showResult(message, error = false) {
   result.classList.toggle("error", error);
 }
 
+function showSubmissionSuccess(submission, accessToken) {
+  result.hidden = false;
+  result.classList.remove("error");
+  result.replaceChildren();
+
+  const message = document.createElement("div");
+  message.textContent = `提交成功，编号：${submission.id}`;
+  const explanation = document.createElement("span");
+  explanation.className = "credential-note";
+  explanation.textContent = "访问凭证用于查看状态、修改或撤回这条提交。编号只能定位记录，不能代替访问凭证。";
+  const actions = document.createElement("div");
+  actions.className = "credential-actions";
+
+  const statusLink = document.createElement("a");
+  statusLink.className = "button button-secondary";
+  statusLink.href = `/submission.html?id=${encodeURIComponent(submission.id)}`;
+  statusLink.textContent = "查看提交状态";
+  const copyButton = document.createElement("button");
+  copyButton.className = "button button-secondary";
+  copyButton.type = "button";
+  copyButton.textContent = "复制访问凭证";
+  copyButton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(accessToken);
+      copyButton.textContent = "已复制";
+    } catch {
+      showResult(`提交成功，访问凭证：${accessToken}`, false);
+    }
+  });
+  actions.append(statusLink, copyButton);
+  result.append(message, explanation, actions);
+}
+
 function loadTurnstile() {
   const siteKey = String(window.SUBMISSION_SITE_KEY || "").trim();
   if (!siteKey) return;
@@ -45,7 +78,7 @@ form.addEventListener("submit", async (event) => {
     localStorage.setItem(`emby-submission-token:${body.submission.id}`, body.accessToken);
     form.reset();
     turnstileToken = "";
-    showResult(`提交成功，编号：${body.submission.id}。请保存此页面或编号，访问令牌已保存在当前浏览器中。`);
+    showSubmissionSuccess(body.submission, body.accessToken);
   } catch (error) {
     showResult(error.message, true);
   } finally {
