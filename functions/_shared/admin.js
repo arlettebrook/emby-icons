@@ -55,6 +55,25 @@ export async function hasAdminSession(request, env) {
   }
 }
 
+export async function hasAdminAccess(request, env) {
+  if (await hasAdminSession(request, env)) return true;
+  const configuredToken = String(env.ADMIN_TOKEN || "").trim();
+  const authorization = request.headers.get("Authorization") || "";
+  const suppliedToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  if (!configuredToken || !suppliedToken) return false;
+  const encoder = new TextEncoder();
+  const [configuredDigest, suppliedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(configuredToken)),
+    crypto.subtle.digest("SHA-256", encoder.encode(suppliedToken)),
+  ]);
+  const configuredBytes = new Uint8Array(configuredDigest);
+  const suppliedBytes = new Uint8Array(suppliedDigest);
+  if (configuredBytes.length !== suppliedBytes.length) return false;
+  let difference = 0;
+  configuredBytes.forEach((byte, index) => { difference |= byte ^ suppliedBytes[index]; });
+  return difference === 0;
+}
+
 export function sessionCookie(request, session) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${SESSION_COOKIE}=${session}; Max-Age=${SESSION_MAX_AGE_SECONDS}; Path=/; HttpOnly; SameSite=Strict${secure}`;

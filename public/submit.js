@@ -76,6 +76,16 @@ form.addEventListener("submit", async (event) => {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `提交失败（${response.status}）`);
     localStorage.setItem(`emby-submission-token:${body.submission.id}`, body.accessToken);
+    const savedSubmissions = (() => {
+      try {
+        const values = JSON.parse(localStorage.getItem("emby-submissions") || "[]");
+        return Array.isArray(values) ? values : [];
+      } catch {
+        return [];
+      }
+    })().filter((item) => item?.id !== body.submission.id);
+    savedSubmissions.unshift({ id: body.submission.id, token: body.accessToken });
+    localStorage.setItem("emby-submissions", JSON.stringify(savedSubmissions.slice(0, 30)));
     form.reset();
     turnstileToken = "";
     showSubmissionSuccess(body.submission, body.accessToken);

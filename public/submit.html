@@ -15,7 +15,8 @@
       .standalone-form textarea { min-height: 100px; resize: vertical; }
       .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; word-break: break-word; }
       .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
-      .standalone-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
+      .standalone-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 18px; }
+      .standalone-links a { text-decoration: none; }
       .credential-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
       .credential-note { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; }
       .turnstile-box { min-height: 65px; }
@@ -35,7 +36,7 @@
           <button class="button button-primary" id="submit-button" type="submit">提交审核</button>
         </form>
         <div class="standalone-result" id="result" hidden></div>
-        <div class="standalone-links"><a href="/">返回主页</a><a href="/submit.html">再次提交</a></div>
+        <div class="standalone-links"><a class="button button-secondary" href="/">返回主页</a><a class="button button-primary" href="/submit.html">再次提交</a></div>
       </section>
     </main>
     <script>

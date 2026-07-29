@@ -1,4 +1,4 @@
-import { isAuthorized } from "../_shared/icons.js";
+import { hasAdminAccess } from "../_shared/admin.js";
 
 const MAX_REQUEST_BYTES = 8 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -99,7 +99,7 @@ async function fetchRemoteJson(startUrl) {
 
 export async function onRequestPost({ request, env }) {
   if (!env.ADMIN_TOKEN) return response(request, { error: "ADMIN_TOKEN is not configured" }, { status: 503 });
-  if (!(await isAuthorized(request, env))) return response(request, { error: "Invalid admin token" }, { status: 401 });
+  if (!(await hasAdminAccess(request, env))) return response(request, { error: "Invalid admin session" }, { status: 401 });
   try {
     const url = await readRequestUrl(request);
     const value = await fetchRemoteJson(url);

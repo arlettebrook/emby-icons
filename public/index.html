@@ -16,6 +16,11 @@
       .home-stat { min-width: 135px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
       .home-stat strong { display: block; color: var(--accent); font-size: 20px; }
       .home-stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+      .home-metadata { display: grid; grid-template-columns: minmax(150px, .35fr) minmax(0, 1fr); gap: 12px; margin-top: 14px; }
+      .home-metadata-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(11 26 22 / 66%); }
+      .home-metadata-card > span { display: block; color: var(--muted); font: 11px "Cascadia Code", Consolas, monospace; text-transform: uppercase; }
+      .home-metadata-card strong, .home-metadata-card p { display: block; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.55; }
+      .home-metadata-card p { color: var(--muted); }
       .home-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 32px; }
       .home-search { flex: 1; min-width: 0; }
       .home-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -29,7 +34,7 @@
       .icon-card strong { display: block; margin-top: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .icon-card small { display: block; margin-top: 5px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
       .home-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; color: var(--muted); font-size: 13px; }
-      @media (max-width: 760px) { .home-header { align-items: flex-start; flex-direction: column; } .home-actions { justify-content: flex-start; } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } }
+      @media (max-width: 760px) { .home-header { align-items: flex-start; flex-direction: column; } .home-actions { justify-content: flex-start; } .home-toolbar { align-items: stretch; flex-direction: column; } .home-count { white-space: normal; } .home-metadata { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
@@ -43,15 +48,18 @@
         <div class="home-actions">
           <a class="button button-primary" href="/submit.html">提交图标</a>
           <a class="button button-secondary" href="/submission.html">查看提交状态</a>
-          <a class="button button-secondary" href="/emby-icons.json" target="_blank" rel="noreferrer">原始 JSON</a>
           <button class="button button-secondary" id="copy-library-button" type="button">复制图标库地址</button>
-          <a class="button button-secondary" href="/admin-login.html">管理员登录</a>
+          <a class="button button-secondary" href="/admin.html">管理员登录</a>
         </div>
       </header>
       <section class="home-stats" aria-label="图标库概览">
         <div class="home-stat"><strong id="home-total">0</strong><span>图标总数</span></div>
         <div class="home-stat"><strong>JSON</strong><span>公开格式</span></div>
         <div class="home-stat"><strong>KV</strong><span>当前来源</span></div>
+      </section>
+      <section class="home-metadata" aria-label="图标库信息">
+        <div class="home-metadata-card"><span>name</span><strong id="home-meta-name">Emby Icons</strong></div>
+        <div class="home-metadata-card"><span>description</span><p id="home-meta-description">浏览已发布的 Emby 图标，搜索、复制并使用图标地址。</p></div>
       </section>
       <section class="home-toolbar" aria-label="图标搜索">
         <label class="search-field home-search" for="home-search">
@@ -63,7 +71,7 @@
       <p class="home-error" id="home-error" hidden></p>
       <section class="home-grid" id="home-grid" aria-live="polite"></section>
       <p class="home-empty" id="home-empty" hidden>没有找到匹配的图标。</p>
-      <footer class="home-footer"><span id="home-updated">数据来自公开图标库</span><a href="/emby-icons.json">查看 JSON</a></footer>
+      <footer class="home-footer"><span id="home-updated">数据来自公开图标库</span><span>公开图标库地址可使用上方按钮复制</span></footer>
     </main>
     <script type="module" src="/home.js"></script>
   </body>

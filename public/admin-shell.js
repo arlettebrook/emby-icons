@@ -6,6 +6,6 @@ logoutButton?.addEventListener("click", async () => {
     await fetch("/api/admin/logout", { method: "POST" });
   } finally {
     sessionStorage.removeItem("emby-icons-admin-token");
-    window.location.assign("/admin-login.html");
+    window.location.assign("/admin.html?login=1");
   }
 });

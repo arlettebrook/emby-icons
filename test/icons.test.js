@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { handleGet, handlePut } from "../functions/_shared/icons.js";
+import { createAdminSession } from "../functions/_shared/admin.js";
 
 const seed = {
   name: "Emby Icons",
@@ -114,6 +115,17 @@ test("PUT rejects stale ETags when the KV document changed", async () => {
   const response = await handlePut(staleUpdate, env);
   assert.equal(response.status, 412);
   assert.match((await response.json()).error, /changed/);
+});
+
+test("PUT accepts an authenticated admin session without a second token prompt", async () => {
+  const env = createEnvironment();
+  const session = await createAdminSession(env);
+  const response = await handlePut(new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Cookie: `emby_admin_session=${session}` },
+    body: JSON.stringify(seed),
+  }), env);
+  assert.equal(response.status, 200);
 });
 
 test("PUT allows an authenticated force overwrite after a stale ETag", async () => {

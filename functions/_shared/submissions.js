@@ -1,10 +1,10 @@
 import {
   createEtag,
-  isAuthorized,
   readDocument,
   saveDocumentSnapshot,
   writeAuditLog,
 } from "./icons.js";
+import { hasAdminAccess } from "./admin.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 120;
@@ -162,8 +162,8 @@ async function requireSubmissionOwner(request, env, id) {
 
 async function requireAdmin(request, env) {
   if (!env.ADMIN_TOKEN) return jsonResponse(request, env, { error: "ADMIN_TOKEN is not configured" }, { status: 503 });
-  if (!(await isAuthorized(request, env))) {
-    return jsonResponse(request, env, { error: "Invalid admin token" }, { status: 401 });
+  if (!(await hasAdminAccess(request, env))) {
+    return jsonResponse(request, env, { error: "Invalid admin session" }, { status: 401 });
   }
   return null;
 }

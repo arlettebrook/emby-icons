@@ -1,3 +1,5 @@
+import { hasAdminAccess } from "./admin.js";
+
 const STORAGE_KEY = "emby-icons.json";
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 
@@ -126,7 +128,7 @@ export async function handleGet(request, env, cacheControl = "no-cache") {
 export async function handlePut(request, env) {
   const adminJsonResponse = (body, init = {}) => jsonResponse(body, init, adminCorsHeaders(request, env));
   if (!env.ADMIN_TOKEN) return adminJsonResponse({ error: "ADMIN_TOKEN is not configured" }, { status: 503 });
-  if (!(await isAuthorized(request, env))) return adminJsonResponse({ error: "Invalid admin token" }, { status: 401 });
+  if (!(await hasAdminAccess(request, env))) return adminJsonResponse({ error: "Invalid admin session" }, { status: 401 });
   if (!env.EMBY_ICONS) return adminJsonResponse({ error: "EMBY_ICONS KV is not configured" }, { status: 503 });
 
   const declaredSize = Number(request.headers.get("Content-Length") || 0);

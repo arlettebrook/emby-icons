@@ -21,10 +21,31 @@
       .moderation-item p { margin: 3px 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
       .moderation-actions { display: flex; gap: 8px; }
       .moderation-actions .danger { border-color: rgb(255 113 140 / 45%); color: var(--danger); }
+      .admin-login-view { width: min(470px, calc(100% - 32px)); margin: 0 auto; padding: 100px 0; }
+      .admin-login-card { padding: 30px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 90%); box-shadow: var(--shadow); }
+      .admin-login-card h1 { margin: 0 0 10px; }
+      .admin-login-card > p { color: var(--muted); line-height: 1.6; }
+      .admin-login-form { display: grid; gap: 16px; margin-top: 24px; }
+      .admin-login-error { min-height: 20px; color: var(--danger); font-size: 13px; }
+      .admin-login-footer { display: flex; justify-content: space-between; margin-top: 20px; font-size: 13px; }
       @media (max-width: 700px) { .moderation-heading { align-items: flex-start; flex-direction: column; } .moderation-item { grid-template-columns: 52px minmax(0, 1fr); } .moderation-item img { width: 48px; height: 48px; } .moderation-actions { grid-column: 1 / -1; } }
     </style>
   </head>
   <body>
+    <section class="admin-login-view" id="admin-login-view">
+      <div class="admin-login-card">
+        <p class="eyebrow">EMBY ICONS / ADMINISTRATION</p>
+        <h1>管理员登录</h1>
+        <p>登录后才能访问正式库编辑、远程导入、审核和发布功能。</p>
+        <form class="admin-login-form" id="admin-login-form">
+          <label class="field"><span>管理员令牌</span><input id="admin-login-token" type="password" autocomplete="current-password" required autofocus /></label>
+          <p class="admin-login-error" id="admin-login-error"></p>
+          <button class="button button-primary" id="admin-login-button" type="submit">登录管理员面板</button>
+        </form>
+        <div class="admin-login-footer"><a href="/">返回主页</a><span>令牌不会写入 URL</span></div>
+      </div>
+    </section>
+    <div id="admin-app" hidden>
     <header class="app-header">
       <div class="header-inner">
         <div class="brand-block">
@@ -251,8 +272,7 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/admin-shell.js"></script>
-    <script type="module" src="/admin-review.js"></script>
-    <script type="module" src="/app.js?v=20260729-ui12"></script>
+    </div>
+    <script type="module" src="/admin-entry.js"></script>
   </body>
 </html>

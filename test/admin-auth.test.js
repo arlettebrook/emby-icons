@@ -20,7 +20,7 @@ test("middleware redirects unauthenticated admin pages", async () => {
     next: async () => new Response("ok"),
   });
   assert.equal(response.status, 302);
-  assert.match(response.headers.get("Location"), /admin-login\.html/);
+  assert.match(response.headers.get("Location"), /admin\.html\?login=1/);
 });
 
 test("middleware allows an authenticated admin page", async () => {

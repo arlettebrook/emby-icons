@@ -243,12 +243,7 @@ async function fetchRemoteJson() {
     return;
   }
 
-  let token = sessionStorage.getItem("emby-icons-admin-token");
-  if (!token) {
-    token = window.prompt("导入远程 JSON 需要管理员令牌");
-    if (!token?.trim()) return;
-    token = token.trim();
-  }
+  const token = sessionStorage.getItem("emby-icons-admin-token") || "";
 
   elements.remoteFetchButton.disabled = true;
   elements.remoteFetchButton.textContent = "获取中...";
@@ -256,7 +251,7 @@ async function fetchRemoteJson() {
   try {
     const response = await fetch("/api/import", {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
       body: JSON.stringify({ url: remoteUrl }),
     });
     const body = await response.json().catch(() => ({}));
@@ -266,7 +261,7 @@ async function fetchRemoteJson() {
     }
     if (!response.ok) throw new Error(body.error || `远程请求失败 (${response.status})`);
     const icons = parseImportedIcons(JSON.stringify(body.value));
-    sessionStorage.setItem("emby-icons-admin-token", token);
+    if (token) sessionStorage.setItem("emby-icons-admin-token", token);
     elements.importEditor.value = `${JSON.stringify({ icons }, null, 2)}\n`;
     elements.importFile.value = "";
     showToast(`已获取 ${icons.length} 个远程图标，请点击导入并保存`);
@@ -582,21 +577,10 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     return;
   }
 
-  if (!token) {
-    forceSaveRequested = force;
-    elements.tokenError.textContent = "";
-    elements.tokenInput.value = "";
-    elements.tokenDialog.showModal();
-    elements.tokenInput.focus();
-    return;
-  }
-
   setBusy(true);
   try {
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
     // Cloudflare KV is eventually consistent across edge locations. A client ETag
     // can legitimately differ from the node handling this write, so normal saves
     // use last-write-wins. Strict If-Match remains available to API clients.
@@ -611,10 +595,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
 
     if (response.status === 401) {
       sessionStorage.removeItem("emby-icons-admin-token");
-      elements.tokenError.textContent = result.error || "管理员令牌无效";
-      elements.tokenInput.value = "";
-      if (!elements.tokenDialog.open) elements.tokenDialog.showModal();
-      elements.tokenInput.focus();
+      window.location.assign("/admin.html?login=1");
       return;
     }
     if (response.status === 412) {
