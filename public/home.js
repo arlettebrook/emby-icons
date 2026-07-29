@@ -6,7 +6,10 @@ const error = document.querySelector("#home-error");
 const updated = document.querySelector("#home-updated");
 const name = document.querySelector("#home-name");
 const description = document.querySelector("#home-description");
+const total = document.querySelector("#home-total");
 const copyLibraryButton = document.querySelector("#copy-library-button");
+const metaName = document.querySelector("#home-meta-name");
+const metaDescription = document.querySelector("#home-meta-description");
 let icons = [];
 
 function safeUrl(value) {
@@ -59,6 +62,9 @@ async function load() {
     description.textContent = typeof body.description === "string" && body.description.trim()
       ? body.description
       : "浏览已发布的 Emby 图标，搜索、复制并使用图标地址。你也可以提交新的图标 URL，审核通过后它才会进入公开图标库。";
+    metaName.textContent = name.textContent;
+    metaDescription.textContent = description.textContent;
+    total.textContent = String(icons.length);
     updated.textContent = `公开图标库 · ${icons.length} 个图标`;
     render();
   } catch (loadError) {
