@@ -370,7 +370,7 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   }));
   await answerCallback(settings.token, callback.id, "请回复拒绝原因").catch(() => {});
   await editTelegramSubmission(settings.token, callback.message, "⏳ 等待拒绝原因：请发送 /reject 拒绝原因").catch(() => {});
-  await sendTelegramMessage(settings.token, settings.chatId, "请发送拒绝原因，格式：\n/reject 原因内容\n\n10 分钟内有效，发送 /cancel 可取消本次拒绝操作。").catch(() => {});
+  await sendTelegramMessage(settings.token, settings.chatId, "请发送拒绝指令：\n/reject [可选的拒绝原因]\n\n直接发送 /reject 也可以拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。").catch(() => {});
 }
 
 async function handleMessageUpdate(env, settings, message) {
@@ -404,10 +404,6 @@ async function handleMessageUpdate(env, settings, message) {
     return;
   }
   const reason = text.replace(/^\/reject(?:@[^\s]+)?/i, "").trim();
-  if (!reason) {
-    await sendTelegramMessage(settings.token, settings.chatId, "请在 /reject 后填写拒绝原因。");
-    return;
-  }
   if (reason.length > 1000) {
     await sendTelegramMessage(settings.token, settings.chatId, "拒绝原因不能超过 1000 个字符。");
     return;
@@ -416,9 +412,9 @@ async function handleMessageUpdate(env, settings, message) {
   const body = await response.json().catch(() => ({}));
   if (response.ok) {
     await env.EMBY_ICONS.delete(key);
-    await sendTelegramMessage(settings.token, settings.chatId, `❌ 已拒绝提交\n编号：${pending.id}\n原因：${reason}`);
+    await sendTelegramMessage(settings.token, settings.chatId, `❌ 已拒绝提交\n编号：${pending.id}\n原因：${reason || "未填写拒绝原因"}`);
     if (pending.messageId) {
-      await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, `❌ 已拒绝\n原因：${reason}`).catch(() => {});
+      await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, `❌ 已拒绝\n原因：${reason || "未填写拒绝原因"}`).catch(() => {});
     }
   } else {
     await sendTelegramMessage(settings.token, settings.chatId, `拒绝失败：${body.error || "无法处理该提交"}`);
