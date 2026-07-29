@@ -16,17 +16,12 @@ npm run dev
 
 ## 通过 GitHub 部署到 Cloudflare Pages
 
-### 1. 将代码推送到 GitHub
+### 1. `fork`本仓库
 
-当前开发分支是 `master`。提交代码并推送到 GitHub：
+- 请 fork `master`分支。
 
-```powershell
-git add README.md .dev.vars.example .gitignore functions package.json package-lock.json public scripts test
-git commit -m "Add Cloudflare Pages icon manager"
-git push origin master
-```
 
-不要提交 `.dev.vars`，它只用于本地开发并已被 `.gitignore` 排除。
+
 
 ### 2. 连接 GitHub 仓库
 
