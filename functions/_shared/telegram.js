@@ -308,16 +308,26 @@ function rejectStateKey(chatId) {
   return `settings/telegram/reject/${encodeURIComponent(chatId)}`;
 }
 
-async function editTelegramSubmission(token, message, suffix) {
+async function editTelegramSubmission(token, message, suffix, replyMarkup = { inline_keyboard: [] }) {
   if (!message?.chat?.id || !message.message_id) return;
   const original = message.text || message.caption || "Emby 图标提交";
   await telegramApi(token, "editMessageText", {
     chat_id: message.chat.id,
     message_id: message.message_id,
-    text: `${original}\n\n${suffix}`,
+    text: suffix ? `${original}\n\n${suffix}` : original,
     disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: [] },
+    reply_markup: replyMarkup,
   });
+}
+
+async function restorePendingSubmission(settings, pending, suffix) {
+  if (!pending?.messageId) return;
+  await editTelegramSubmission(
+    settings.token,
+    { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" },
+    suffix,
+    submissionKeyboard(pending.id),
+  ).catch(() => {});
 }
 
 async function answerCallback(token, callbackId, text) {
@@ -381,8 +391,19 @@ async function handleMessageUpdate(env, settings, message) {
   const key = rejectStateKey(chatId);
   const pendingRaw = await env.EMBY_ICONS.get(key);
   if (text.toLowerCase() === "/cancel") {
-    await env.EMBY_ICONS.delete(key);
-    await sendTelegramMessage(settings.token, settings.chatId, "已取消本次拒绝操作。");
+    if (!pendingRaw) {
+      await sendTelegramMessage(settings.token, settings.chatId, "当前没有等待中的拒绝操作。");
+      return;
+    }
+    try {
+      const pending = JSON.parse(pendingRaw);
+      await env.EMBY_ICONS.delete(key);
+      await restorePendingSubmission(settings, pending, "↩️ 已取消拒绝操作，可重新审核。");
+      await sendTelegramMessage(settings.token, settings.chatId, "已取消本次拒绝操作，审核按钮已恢复。");
+    } catch {
+      await env.EMBY_ICONS.delete(key);
+      await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已失效，请重新点击审核消息中的按钮。");
+    }
     return;
   }
   if (!/^\/reject(?:@[^\s]+)?(?:\s|$)/i.test(text)) return;
@@ -400,6 +421,7 @@ async function handleMessageUpdate(env, settings, message) {
   }
   if (Date.now() - Number(pending.createdAt || 0) > 10 * 60 * 1000) {
     await env.EMBY_ICONS.delete(key);
+    await restorePendingSubmission(settings, pending, "⏱️ 拒绝操作已超时，可重新审核。");
     await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已超时，请重新点击审核消息中的“拒绝”按钮。");
     return;
   }
