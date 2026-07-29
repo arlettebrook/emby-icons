@@ -7,7 +7,7 @@
     <meta name="robots" content="noindex, nofollow" />
     <meta http-equiv="refresh" content="0; url=/admin.html?login=1" />
     <title>管理员登录</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui23" />
+    <link rel="stylesheet" href="/styles.css?v=20260729-ui24" />
     <style>
       .login-page { width: min(470px, calc(100% - 32px)); margin: 0 auto; padding: 100px 0; }
       .login-card { padding: 30px; border: 1px solid var(--line-strong); border-radius: 14px; background: rgb(11 26 22 / 90%); box-shadow: var(--shadow); }
@@ -15,7 +15,9 @@
       .login-card p { color: var(--muted); line-height: 1.6; }
       .login-form { display: grid; gap: 16px; margin-top: 24px; }
       .login-error { min-height: 20px; color: var(--danger); font-size: 13px; }
-      .login-footer { display: flex; justify-content: space-between; margin-top: 20px; font-size: 13px; }
+      .login-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; font-size: 13px; }
+      .login-credit { display: inline-flex; align-items: center; min-height: 32px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: rgb(255 255 255 / 78%); color: #0ea5e9; font-size: 12px; font-weight: 680; text-decoration: none; }
+      .login-credit:hover { border-color: #7dd3fc; background: #effaff; color: #0369a1; }
     </style>
   </head>
   <body>
@@ -29,7 +31,7 @@
           <p class="login-error" id="login-error"></p>
           <button class="button button-primary" id="login-button" type="submit">登录管理员面板</button>
         </form>
-        <div class="login-footer"><a href="/">返回主页</a><span>令牌不会写入 URL</span></div>
+        <div class="login-footer"><a class="button button-secondary" href="/">返回主页</a><a class="login-credit" href="https://github.com/arlettebrook/emby-icons" target="_blank" rel="noreferrer">EMBY-ICONS by NaN</a></div>
       </section>
     </main>
     <script type="module" src="/admin-login.js"></script>
