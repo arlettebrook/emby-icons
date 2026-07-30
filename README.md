@@ -5,7 +5,7 @@
 
   > 自带GitHub代理加速
   >
-  > 目前「2025.7.31」已收录 2500+ Emby图标
+  > 目前「2025.7.31」已收录 2500+ Emby 图标
 
 # 新增icon
 - 访问：https://emby-icons.lyra.cc.cd/submit
