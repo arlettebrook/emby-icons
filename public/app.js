@@ -4,6 +4,14 @@ const elements = {
   copyButton: document.querySelector("#copy-button"),
   copyPublicButton: document.querySelector("#copy-public-button"),
   clearSearch: document.querySelector("#clear-search"),
+  deleteSearchResults: document.querySelector("#delete-search-results"),
+  searchDeleteDialog: document.querySelector("#search-delete-dialog"),
+  searchDeleteClose: document.querySelector("#search-delete-close"),
+  searchDeleteCancel: document.querySelector("#search-delete-cancel"),
+  searchDeleteConfirm: document.querySelector("#search-delete-confirm"),
+  searchDeleteLead: document.querySelector("#search-delete-lead"),
+  searchDeleteTargets: document.querySelector("#search-delete-targets"),
+  searchDeleteError: document.querySelector("#search-delete-error"),
   conflictBanner: document.querySelector("#conflict-banner"),
   conflictClose: document.querySelector("#conflict-close"),
   conflictForce: document.querySelector("#conflict-force"),
@@ -66,6 +74,7 @@ let sortMode = "manual";
 let renderLimit = 24;
 let searchIndex = [];
 let renderFrame = 0;
+let pendingSearchDeleteIcons = [];
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 
@@ -139,6 +148,84 @@ function showToast(message) {
 
 function updateSearchClearButton() {
   elements.clearSearch.hidden = elements.searchInput.value.length === 0;
+}
+
+function getSearchMatches() {
+  if (searchIndex.length !== documentData.icons.length) rebuildSearchIndex();
+  const normalizedQuery = filterQuery.trim().toLocaleLowerCase();
+  return documentData.icons
+    .map((icon, index) => ({ icon, index }))
+    .filter(({ index }) => !normalizedQuery || searchIndex[index].includes(normalizedQuery));
+}
+
+function updateSearchDeleteButton(matchCount = getSearchMatches().length) {
+  const hasSearch = filterQuery.trim().length > 0;
+  elements.deleteSearchResults.hidden = !hasSearch || matchCount === 0;
+  elements.deleteSearchResults.textContent = `删除搜索结果（${matchCount}）`;
+}
+
+function renderSearchDeleteTargets(matches) {
+  elements.searchDeleteTargets.replaceChildren();
+  const fragment = document.createDocumentFragment();
+  matches.forEach(({ icon, index }) => {
+    const target = document.createElement("article");
+    target.className = "search-delete-target";
+    const name = document.createElement("strong");
+    name.textContent = icon.name || `第 ${index + 1} 项`;
+    const url = document.createElement("span");
+    url.textContent = icon.url || "（空地址）";
+    target.append(name, url);
+    fragment.append(target);
+  });
+  elements.searchDeleteTargets.append(fragment);
+}
+
+function openSearchDeleteDialog() {
+  try {
+    syncCurrentEditorState();
+  } catch (error) {
+    showToast(error.message);
+    return;
+  }
+
+  const matches = getSearchMatches();
+  if (!matches.length) {
+    updateSearchDeleteButton(0);
+    return;
+  }
+
+  pendingSearchDeleteIcons = matches.map(({ icon }) => icon);
+  elements.searchDeleteLead.textContent = `将删除当前搜索匹配的 ${matches.length} 个图标，删除后需要点击“保存更改”同步到云端。`;
+  elements.searchDeleteError.textContent = "";
+  elements.searchDeleteConfirm.disabled = false;
+  renderSearchDeleteTargets(matches);
+  elements.searchDeleteDialog.showModal();
+}
+
+function closeSearchDeleteDialog() {
+  pendingSearchDeleteIcons = [];
+  if (elements.searchDeleteDialog.open) elements.searchDeleteDialog.close();
+}
+
+function confirmSearchDelete() {
+  const targets = new Set(pendingSearchDeleteIcons);
+  if (!targets.size) return;
+  elements.searchDeleteConfirm.disabled = true;
+  try {
+    const before = documentData.icons.length;
+    documentData.icons = documentData.icons.filter((icon) => !targets.has(icon));
+    const removed = before - documentData.icons.length;
+    if (!removed) throw new Error("搜索结果已发生变化，请重新搜索后再试");
+    rebuildSearchIndex();
+    renderStructured();
+    renderJson();
+    setDirty(true);
+    closeSearchDeleteDialog();
+    showToast(`已删除 ${removed} 个搜索结果，请点击“保存更改”同步到云端`);
+  } catch (error) {
+    elements.searchDeleteError.textContent = error.message;
+    elements.searchDeleteConfirm.disabled = false;
+  }
 }
 
 function parseImportedIcons(raw) {
@@ -411,11 +498,8 @@ function updatePreview(image, url) {
 
 function renderIconList() {
   elements.iconList.replaceChildren();
-  if (searchIndex.length !== documentData.icons.length) rebuildSearchIndex();
   const normalizedQuery = filterQuery.trim().toLocaleLowerCase();
-  const visibleIcons = documentData.icons
-    .map((icon, index) => ({ icon, index }))
-    .filter(({ index }) => !normalizedQuery || searchIndex[index].includes(normalizedQuery));
+  const visibleIcons = getSearchMatches();
 
   const displayedIcons = visibleIcons.slice(0, renderLimit);
 
@@ -427,6 +511,7 @@ function renderIconList() {
   elements.emptyTitle.textContent = normalizedQuery ? "没有匹配结果" : "暂无图标";
   elements.emptyCopy.textContent = normalizedQuery ? "换一个关键词，或清除搜索条件。" : "添加你的第一个图标开始吧。";
   elements.emptyAddButton.hidden = Boolean(normalizedQuery);
+  updateSearchDeleteButton(visibleIcons.length);
 
   const fragment = document.createDocumentFragment();
   displayedIcons.forEach(({ icon, index }) => {
@@ -707,6 +792,14 @@ elements.searchInput.addEventListener("input", () => {
   renderLimit = 24;
   updateSearchClearButton();
   scheduleIconListRender();
+});
+
+elements.deleteSearchResults.addEventListener("click", openSearchDeleteDialog);
+elements.searchDeleteClose.addEventListener("click", closeSearchDeleteDialog);
+elements.searchDeleteCancel.addEventListener("click", closeSearchDeleteDialog);
+elements.searchDeleteConfirm.addEventListener("click", confirmSearchDelete);
+elements.searchDeleteDialog.addEventListener("click", (event) => {
+  if (event.target === elements.searchDeleteDialog) closeSearchDeleteDialog();
 });
 
 elements.clearSearch.addEventListener("click", () => {

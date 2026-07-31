@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260731-ui30" />
+    <link rel="stylesheet" href="/styles.css?v=20260731-ui32" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -162,9 +162,10 @@
             <div class="list-tools">
               <label class="search-field" for="icon-search">
                 <span aria-hidden="true">⌕</span>
-                <input id="icon-search" type="search" placeholder="搜索名称或地址" autocomplete="off" />
-                <button id="clear-search" class="clear-search" type="button" aria-label="清除搜索" title="清除搜索">×</button>
+                <input id="icon-search" type="text" inputmode="search" enterkeyhint="search" placeholder="搜索名称或地址" autocomplete="off" />
+                <button id="clear-search" class="clear-search" type="button" aria-label="清除搜索" title="清除搜索" hidden>×</button>
               </label>
+              <button class="button button-danger search-delete-results-button" id="delete-search-results" type="button" hidden>删除搜索结果</button>
               <label class="sort-field" for="icon-sort">
                 <span>排序</span>
                 <select id="icon-sort">
@@ -300,6 +301,22 @@
         </div>
       </article>
     </template>
+
+    <dialog class="search-delete-dialog" id="search-delete-dialog">
+      <form class="search-delete-panel" id="search-delete-form" method="dialog">
+        <div class="dialog-heading">
+          <h2>确认批量删除</h2>
+          <button class="icon-button" id="search-delete-close" type="button" aria-label="关闭" title="关闭">×</button>
+        </div>
+        <p class="dialog-lead" id="search-delete-lead"></p>
+        <div class="search-delete-targets" id="search-delete-targets"></div>
+        <p class="dialog-error" id="search-delete-error"></p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" id="search-delete-cancel" type="button">取消</button>
+          <button class="button button-danger" id="search-delete-confirm" type="button">确认删除</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="import-dialog">
       <form method="dialog" id="import-form">

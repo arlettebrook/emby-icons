@@ -661,6 +661,8 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   padding: 0;
   border: 0;
   outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--ink);
 }
@@ -689,6 +691,10 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   cursor: pointer;
   font-size: 17px;
   line-height: 1;
+}
+
+.clear-search[hidden] {
+  display: none !important;
 }
 
 .clear-search:hover {
@@ -1389,6 +1395,102 @@ dialog form {
   .toast {
     right: 10px;
     bottom: 10px;
+  }
+}
+
+/* Keep one clear control in the search field across browsers. */
+.search-field input[type="search"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.search-field input[type="search"]::-webkit-search-cancel-button,
+.search-field input[type="search"]::-webkit-search-decoration,
+.search-field input[type="search"]::-ms-clear {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.search-delete-results-button[hidden] {
+  display: none;
+}
+
+.search-delete-dialog {
+  width: min(720px, calc(100% - 28px));
+  max-height: min(760px, calc(100vh - 28px));
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.search-delete-dialog::backdrop {
+  background: rgb(15 23 42 / 28%);
+  backdrop-filter: blur(6px);
+}
+
+.search-delete-panel {
+  max-height: min(760px, calc(100vh - 28px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.search-delete-targets {
+  display: grid;
+  gap: 8px;
+  max-height: min(430px, 52vh);
+  overflow: auto;
+  margin-top: 16px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.search-delete-target {
+  display: grid;
+  gap: 3px;
+  padding: 10px 11px;
+  border: 1px solid #e2edf2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.search-delete-target strong {
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.search-delete-target span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 680px) {
+  .list-tools > .search-delete-results-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .search-delete-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .search-delete-panel {
+    max-height: calc(100vh - 20px);
+    padding: 17px;
   }
 }
 
