@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260729-ui24" />
+    <link rel="stylesheet" href="/styles.css?v=20260731-ui28" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -91,6 +91,7 @@
         </div>
         <div class="header-actions">
           <a class="button button-secondary" href="/">普通主页</a>
+          <button class="button button-secondary" id="icon-validity-open-button" type="button">图标有效性检测</button>
           <button class="button button-secondary" id="moderation-open-button" type="button">审核队列</button>
           <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
           <button class="button button-primary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制图标库地址</button>
@@ -201,6 +202,32 @@
           <textarea id="json-editor" spellcheck="false" autocomplete="off"></textarea>
         </section>
       </div>
+
+      <dialog class="icon-validity-dialog" id="icon-validity-dialog">
+        <section class="icon-validity-panel" aria-labelledby="icon-validity-title">
+          <div class="icon-validity-heading">
+            <div>
+              <p class="eyebrow">ICON LIBRARY / HEALTH CHECK</p>
+              <h2 id="icon-validity-title">图标有效性检测</h2>
+              <p>检测所有图标地址是否能正常加载为图片或网站图标。检测与删除只影响当前编辑内容。</p>
+            </div>
+            <div class="icon-validity-actions">
+              <button class="button button-secondary" id="icon-validity-rescan" type="button">重新检测</button>
+              <button class="button button-secondary" id="icon-validity-close" type="button">关闭</button>
+            </div>
+          </div>
+          <div class="icon-validity-summary" id="icon-validity-summary" role="status" aria-live="polite"></div>
+          <div class="icon-validity-toolbar">
+            <p id="icon-validity-note">删除后会自动保存到云端仓库。</p>
+            <button class="button button-danger" id="icon-validity-delete-all" type="button" disabled>一键删除无效图标</button>
+          </div>
+          <div class="icon-validity-list" id="icon-validity-list"></div>
+          <div class="icon-validity-empty" id="icon-validity-empty" hidden>
+            <strong>没有检测到无效图标</strong>
+            <span>所有图标地址都可以正常加载。</span>
+          </div>
+        </section>
+      </dialog>
 
       <dialog class="moderation-dialog" id="moderation-dialog">
       <section class="moderation-panel" id="moderation-panel">

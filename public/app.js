@@ -60,6 +60,7 @@ let toastTimer;
 let filterQuery = "";
 let conflictActive = false;
 let hasDocument = false;
+let documentReady = false;
 let forceSaveRequested = false;
 let sortMode = "manual";
 let renderLimit = 24;
@@ -521,6 +522,8 @@ async function loadDocument({ confirmDiscard = false } = {}) {
       renderStructured();
       renderJson();
       setDirty(false);
+      documentReady = true;
+      document.dispatchEvent(new CustomEvent("emby-icons:document-ready"));
       setConnection("KV 中暂无数据，请导入 JSON", "warning");
       showToast("KV 中暂无数据，请导入 JSON");
       return;
@@ -543,6 +546,8 @@ async function loadDocument({ confirmDiscard = false } = {}) {
     renderStructured();
     renderJson();
     setDirty(false);
+    documentReady = true;
+    document.dispatchEvent(new CustomEvent("emby-icons:document-ready"));
     setConnection("已连接 Cloudflare KV");
   } catch (error) {
     setConnection(error.message, "error");
@@ -553,19 +558,19 @@ async function loadDocument({ confirmDiscard = false } = {}) {
 }
 
 async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token"), force = false) {
-  if (saving) return;
+  if (saving) return false;
   if (!dirty) {
     showToast("当前没有待保存的修改");
-    return;
+    return false;
   }
   if (conflictActive && !force) {
     showToast("请先重新加载云端版本，再保存修改");
-    return;
+    return false;
   }
   if (activeTab === "json") {
     if (!syncFromJson()) {
       showToast("JSON 校验未通过");
-      return;
+      return false;
     }
   } else {
     syncStructuredFields();
@@ -574,7 +579,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
   const validationError = validDocument(documentData);
   if (validationError) {
     showToast(validationError);
-    return;
+    return false;
   }
 
   setBusy(true);
@@ -588,6 +593,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
 
     const response = await fetch("/api/icons", {
       method: "PUT",
+      credentials: "same-origin",
       headers,
       body: JSON.stringify(documentData),
     });
@@ -596,16 +602,16 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     if (response.status === 401) {
       sessionStorage.removeItem("emby-icons-admin-token");
       window.location.assign("/admin.html?login=1");
-      return;
+      return false;
     }
     if (response.status === 412) {
       showConflict();
       showToast("云端内容已更新，请重新加载后再保存");
-      return;
+      return false;
     }
     if (!response.ok) throw new Error(result.error || `保存失败 (${response.status})`);
 
-    sessionStorage.setItem("emby-icons-admin-token", token);
+    if (token) sessionStorage.setItem("emby-icons-admin-token", token);
     hasDocument = true;
     currentEtag = response.headers.get("ETag");
     renderJson();
@@ -614,8 +620,10 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     setConnection("已连接 Cloudflare KV");
     if (elements.tokenDialog.open) elements.tokenDialog.close();
     showToast(`已保存 ${result.count} 个图标`);
+    return true;
   } catch (error) {
     showToast(error.message);
+    return false;
   } finally {
     setBusy(false);
   }
@@ -785,6 +793,38 @@ document.addEventListener("keydown", (event) => {
     saveDocument();
   }
 });
+
+function syncCurrentEditorState() {
+  if (activeTab === "json") {
+    if (!syncFromJson()) throw new Error("请先修正 JSON 错误，再进行图标检测或删除");
+  } else {
+    syncStructuredFields();
+  }
+  return documentData;
+}
+
+window.embyIconsAdmin = {
+  isReady: () => documentReady,
+  getDocument: () => syncCurrentEditorState(),
+  save: async () => {
+    while (saving) await new Promise((resolve) => window.setTimeout(resolve, 50));
+    return saveDocument();
+  },
+  removeIcons: (icons) => {
+    if (!Array.isArray(icons) || !icons.length) return 0;
+    syncCurrentEditorState();
+    const targets = new Set(icons);
+    const before = documentData.icons.length;
+    documentData.icons = documentData.icons.filter((icon) => !targets.has(icon));
+    const removed = before - documentData.icons.length;
+    if (!removed) return 0;
+    rebuildSearchIndex();
+    renderStructured();
+    renderJson();
+    setDirty(true);
+    return removed;
+  },
+};
 
 updateSearchClearButton();
 loadDocument();
