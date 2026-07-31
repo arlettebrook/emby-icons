@@ -183,6 +183,7 @@ async function applyRemoval(entries) {
     }
     note.textContent = `已删除 ${removed} 个图标，并已自动保存到云端。`;
     note.className = "icon-validity-note is-success";
+    setSummary(`已删除 ${removed} 个图标，并已自动保存。`, "success");
     return removed;
   } finally {
     removalSaving = false;
@@ -356,7 +357,7 @@ deleteAllButton?.addEventListener("click", async () => {
   if (!window.confirm(`确定删除 ${invalidEntries.length} 个无效图标吗？删除后会立即自动保存到云端。`)) return;
   try {
     const removed = await applyRemoval([...invalidEntries]);
-    if (removed) setSummary(`已删除 ${removed} 个无效图标，并已自动保存。`, "success");
+    if (!removed) setSummary("没有可删除的无效图标。", "success");
   } catch (error) {
     setSummary(error.message, "error");
   }
