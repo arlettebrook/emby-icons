@@ -1,5 +1,5 @@
 # EMBY-ICONS
-- 自用`Emby icons` [By NaN](https://t.me/Astrnan)。
+- 自用`Emby icons` [By NaN](https://t.me/MikuNaNChannel)。
 - 导入地址：
 - https://emby-icons.lyra.cc.cd/emby-icons.json ［推荐］
 
