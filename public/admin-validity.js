@@ -3,6 +3,7 @@ const dialog = document.querySelector("#icon-validity-dialog");
 const closeButton = document.querySelector("#icon-validity-close");
 const rescanButton = document.querySelector("#icon-validity-rescan");
 const deleteAllButton = document.querySelector("#icon-validity-delete-all");
+const retrySaveButton = document.querySelector("#icon-validity-retry-save");
 const summary = document.querySelector("#icon-validity-summary");
 const note = document.querySelector("#icon-validity-note");
 const list = document.querySelector("#icon-validity-list");
@@ -15,6 +16,7 @@ let activeScan = null;
 let scanSequence = 0;
 let removalSaving = false;
 let resultRenderFrame = 0;
+let pendingResultEntries = [];
 
 function setSummary(message, state = "") {
   summary.textContent = message;
@@ -26,6 +28,7 @@ function setScanControls(scanning) {
   rescanButton.disabled = busy;
   openButton.disabled = busy;
   deleteAllButton.disabled = busy || invalidEntries.length === 0;
+  retrySaveButton.disabled = busy;
   list.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
 }
 
@@ -83,44 +86,56 @@ function updateDeleteAllLabel() {
   deleteAllButton.disabled = Boolean(activeScan) || removalSaving || invalidEntries.length === 0;
 }
 
+function createInvalidEntryArticle(entry) {
+  const article = document.createElement("article");
+  article.className = "icon-validity-item";
+
+  const image = document.createElement("div");
+  image.className = "icon-validity-preview";
+  image.setAttribute("role", "img");
+  image.setAttribute("aria-label", entry.icon.name || "无效图标");
+  image.textContent = "!";
+
+  const content = document.createElement("div");
+  content.className = "icon-validity-item-content";
+  const title = document.createElement("h3");
+  title.textContent = entry.icon.name || `第 ${entry.index + 1} 项`;
+  const reason = document.createElement("p");
+  reason.className = "icon-validity-reason";
+  reason.textContent = entry.reason;
+  const url = document.createElement("p");
+  url.className = "icon-validity-url";
+  url.textContent = entry.icon.url || "（空地址）";
+  content.append(title, reason, url);
+
+  const action = document.createElement("button");
+  action.className = "button button-danger";
+  action.type = "button";
+  action.disabled = Boolean(activeScan) || removalSaving;
+  action.textContent = "删除";
+  action.addEventListener("click", () => removeEntry(entry));
+
+  article.append(image, content, action);
+  return article;
+}
+
 function renderInvalidEntries() {
   list.replaceChildren();
   // Keep the healthy-state message visible while scanning. It only disappears
   // once an invalid result is available to show.
   empty.hidden = invalidEntries.length !== 0;
-  invalidEntries.forEach((entry) => {
-    const article = document.createElement("article");
-    article.className = "icon-validity-item";
+  const fragment = document.createDocumentFragment();
+  invalidEntries.forEach((entry) => fragment.append(createInvalidEntryArticle(entry)));
+  list.append(fragment);
+  updateDeleteAllLabel();
+}
 
-    const image = document.createElement("div");
-    image.className = "icon-validity-preview";
-    image.alt = entry.icon.name || "无效图标";
-    image.setAttribute("role", "img");
-    image.setAttribute("aria-label", entry.icon.name || "无效图标");
-    image.textContent = "!";
-
-    const content = document.createElement("div");
-    content.className = "icon-validity-item-content";
-    const title = document.createElement("h3");
-    title.textContent = entry.icon.name || `第 ${entry.index + 1} 项`;
-    const reason = document.createElement("p");
-    reason.className = "icon-validity-reason";
-    reason.textContent = entry.reason;
-    const url = document.createElement("p");
-    url.className = "icon-validity-url";
-    url.textContent = entry.icon.url || "（空地址）";
-    content.append(title, reason, url);
-
-    const action = document.createElement("button");
-    action.className = "button button-danger";
-    action.type = "button";
-    action.disabled = Boolean(activeScan) || removalSaving;
-    action.textContent = "删除";
-    action.addEventListener("click", () => removeEntry(entry));
-
-    article.append(image, content, action);
-    list.append(article);
-  });
+function appendInvalidEntries(entries) {
+  if (!entries.length) return;
+  const fragment = document.createDocumentFragment();
+  entries.forEach((entry) => fragment.append(createInvalidEntryArticle(entry)));
+  list.append(fragment);
+  empty.hidden = invalidEntries.length !== 0;
   updateDeleteAllLabel();
 }
 
@@ -135,14 +150,16 @@ async function applyRemoval(entries) {
   removalSaving = true;
   renderInvalidEntries();
   setScanControls(false);
-  note.textContent = `已删除 ${removed} 个图标，正在自动保存…`;
-  note.className = "icon-validity-note";
+    note.textContent = `已删除 ${removed} 个图标，正在自动保存…`;
+    note.className = "icon-validity-note";
+  retrySaveButton.hidden = true;
   setSummary("正在自动保存删除结果…", "running");
   try {
     const saved = await admin.save?.();
     if (!saved) {
       note.textContent = "删除已应用到当前编辑器，但自动保存失败，请检查页面提示后重试。";
       note.className = "icon-validity-note is-error";
+      retrySaveButton.hidden = false;
       throw new Error("自动保存失败，请检查登录状态或云端冲突提示");
     }
     note.textContent = `已删除 ${removed} 个图标，并已自动保存到云端。`;
@@ -175,8 +192,40 @@ function scheduleResultRender() {
   if (resultRenderFrame) return;
   resultRenderFrame = window.requestAnimationFrame(() => {
     resultRenderFrame = 0;
-    renderInvalidEntries();
+    const entries = pendingResultEntries;
+    pendingResultEntries = [];
+    if (activeScan) appendInvalidEntries(entries);
+    else renderInvalidEntries();
   });
+}
+
+async function retrySave() {
+  if (removalSaving) return;
+  const admin = window.embyIconsAdmin;
+  if (!admin?.save) {
+    setSummary("保存功能尚未准备好，请刷新页面后重试。", "error");
+    return;
+  }
+  removalSaving = true;
+  retrySaveButton.hidden = true;
+  setScanControls(false);
+  note.textContent = "正在重试保存…";
+  note.className = "icon-validity-note";
+  setSummary("正在重试保存删除结果…", "running");
+  try {
+    if (!await admin.save()) throw new Error("自动保存失败，请检查登录状态或云端冲突提示");
+    note.textContent = "删除结果已成功保存到云端。";
+    note.className = "icon-validity-note is-success";
+    setSummary("删除结果已保存。", "success");
+  } catch (error) {
+    retrySaveButton.hidden = false;
+    note.textContent = "保存仍未成功，请检查登录状态或云端冲突提示。";
+    note.className = "icon-validity-note is-error";
+    setSummary(error.message, "error");
+  } finally {
+    removalSaving = false;
+    setScanControls(false);
+  }
 }
 
 async function runScan() {
@@ -184,6 +233,11 @@ async function runScan() {
   const run = { id: ++scanSequence, controller: new AbortController() };
   activeScan = run;
   invalidEntries = [];
+  pendingResultEntries = [];
+  if (resultRenderFrame) {
+    window.cancelAnimationFrame(resultRenderFrame);
+    resultRenderFrame = 0;
+  }
   renderInvalidEntries();
   note.textContent = "只会列出无法作为图片或网站图标加载的地址。";
   note.className = "icon-validity-note";
@@ -205,6 +259,8 @@ async function runScan() {
   const results = [];
   const cache = new Map();
   let lastProgressAt = 0;
+  let validCount = 0;
+  let invalidCount = 0;
   setSummary(`正在检测 0 / ${icons.length}…`, "running");
 
   async function worker() {
@@ -215,21 +271,31 @@ async function runScan() {
       const result = await inspectIcon(icons[index], run.controller.signal, cache);
       if (result.cancelled || run.id !== scanSequence) return;
       if (!result.valid) {
-        results.push({ icon: icons[index], index, reason: result.reason });
-        invalidEntries = results.slice().sort((left, right) => left.index - right.index);
+        const entry = { icon: icons[index], index, reason: result.reason };
+        results.push(entry);
+        invalidEntries.push(entry);
+        pendingResultEntries.push(entry);
+        invalidCount += 1;
         scheduleResultRender();
+      } else {
+        validCount += 1;
       }
       completed += 1;
       const now = Date.now();
       if (completed === icons.length || now - lastProgressAt >= 100) {
         lastProgressAt = now;
-        setSummary(`正在检测 ${completed} / ${icons.length}…`, "running");
+        setSummary(`正在检测 ${completed} / ${icons.length}（有效 ${validCount}，无效 ${invalidCount}）…`, "running");
       }
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, icons.length) }, worker));
   if (run.id !== scanSequence || run.controller.signal.aborted) return;
+  pendingResultEntries = [];
+  if (resultRenderFrame) {
+    window.cancelAnimationFrame(resultRenderFrame);
+    resultRenderFrame = 0;
+  }
   results.sort((left, right) => left.index - right.index);
   invalidEntries = results;
   activeScan = null;
@@ -276,6 +342,7 @@ deleteAllButton?.addEventListener("click", async () => {
     setSummary(error.message, "error");
   }
 });
+retrySaveButton?.addEventListener("click", retrySave);
 dialog?.addEventListener("click", (event) => {
   if (event.target === dialog) closeDialog();
 });

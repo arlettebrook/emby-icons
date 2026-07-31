@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20260731-ui28" />
+    <link rel="stylesheet" href="/styles.css?v=20260731-ui29" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -219,6 +219,7 @@
           <div class="icon-validity-summary" id="icon-validity-summary" role="status" aria-live="polite"></div>
           <div class="icon-validity-toolbar">
             <p id="icon-validity-note">删除后会自动保存到云端仓库。</p>
+            <button class="button button-secondary" id="icon-validity-retry-save" type="button" hidden>重试保存</button>
             <button class="button button-danger" id="icon-validity-delete-all" type="button" disabled>一键删除无效图标</button>
           </div>
           <div class="icon-validity-list" id="icon-validity-list"></div>

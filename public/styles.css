@@ -2563,6 +2563,10 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   margin: 0;
 }
 
+.icon-validity-toolbar .button[hidden] {
+  display: none;
+}
+
 .icon-validity-note.is-success {
   color: #047857;
 }
