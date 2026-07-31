@@ -6,6 +6,8 @@
   > 自带GitHub代理加速
   >
   > 目前「2025.7.31」已收录 2500+ Emby 图标
+  > 
+  > 如不希望收录请[联系](https://t.me/MikuNaNChannel)删除
 
 # 新增icon
 - 访问：https://emby-icons.lyra.cc.cd/submit
