@@ -7,11 +7,14 @@
   >
   > 目前「2025.7.31」已收录 2500+ Emby 图标
   > 
-  > 如不希望收录请[联系](https://t.me/MikuNaNChannel)删除
+  > 图标来自各位大佬，如不希望收录请 [联系](https://t.me/MikuNaNChannel?direct) 删除
 
 # 新增icon
-- 访问：https://emby-icons.lyra.cc.cd/submit
-- 备用图床：https://twilight.vvvv.ee
-  
-  > 认证码：`Arlettebrook`
 
+访问：https://emby-icons.lyra.cc.cd/submit
+  
+<details>
+    <summary>备用图床</summary>
+  https://twilight.vvvv.ee 
+   认证码：Arlettebrook
+</details>
