@@ -20,8 +20,8 @@ async function loadAdminApp() {
   await import("/admin-shell.js");
   await import("/admin-review.js?v=20260729-ui14");
   await import("/admin-proxy.js?v=20260729-ui1");
-  await import("/app.js?v=20260731-ui16");
-  await import("/admin-validity.js?v=20260731-ui12");
+  await import("/app.js?v=20260731-ui17");
+  await import("/admin-validity.js?v=20260731-ui13");
 }
 
 async function hasSession() {

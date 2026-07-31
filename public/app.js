@@ -557,19 +557,22 @@ async function loadDocument({ confirmDiscard = false } = {}) {
   }
 }
 
-async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token"), force = false) {
+async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-token"), force = false, silent = false) {
+  const notify = (message) => {
+    if (!silent) showToast(message);
+  };
   if (saving) return false;
   if (!dirty) {
-    showToast("当前没有待保存的修改");
+    notify("当前没有待保存的修改");
     return false;
   }
   if (conflictActive && !force) {
-    showToast("请先重新加载云端版本，再保存修改");
+    notify("请先重新加载云端版本，再保存修改");
     return false;
   }
   if (activeTab === "json") {
     if (!syncFromJson()) {
-      showToast("JSON 校验未通过");
+      notify("JSON 校验未通过");
       return false;
     }
   } else {
@@ -578,7 +581,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
 
   const validationError = validDocument(documentData);
   if (validationError) {
-    showToast(validationError);
+    notify(validationError);
     return false;
   }
 
@@ -606,7 +609,7 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     }
     if (response.status === 412) {
       showConflict();
-      showToast("云端内容已更新，请重新加载后再保存");
+      notify("云端内容已更新，请重新加载后再保存");
       return false;
     }
     if (!response.ok) throw new Error(result.error || `保存失败 (${response.status})`);
@@ -619,10 +622,10 @@ async function saveDocument(token = sessionStorage.getItem("emby-icons-admin-tok
     clearConflict();
     setConnection("已连接 Cloudflare KV");
     if (elements.tokenDialog.open) elements.tokenDialog.close();
-    showToast(`已保存 ${result.count} 个图标`);
+    notify(`已保存 ${result.count} 个图标`);
     return true;
   } catch (error) {
-    showToast(error.message);
+    notify(error.message);
     return false;
   } finally {
     setBusy(false);
@@ -808,7 +811,7 @@ window.embyIconsAdmin = {
   getDocument: () => syncCurrentEditorState(),
   save: async () => {
     while (saving) await new Promise((resolve) => window.setTimeout(resolve, 50));
-    return saveDocument();
+    return saveDocument(undefined, false, true);
   },
   removeIcons: (icons) => {
     if (!Array.isArray(icons) || !icons.length) return 0;

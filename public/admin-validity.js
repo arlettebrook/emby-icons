@@ -169,7 +169,7 @@ async function applyRemoval(entries) {
   removalSaving = true;
   renderInvalidEntries();
   setScanControls(false);
-    note.textContent = `已删除 ${removed} 个图标，正在自动保存…`;
+  note.textContent = `已删除 ${removed} 个图标，正在同步到云端…`;
     note.className = "icon-validity-note";
   retrySaveButton.hidden = true;
   setSummary("正在自动保存删除结果…", "running");
@@ -181,7 +181,7 @@ async function applyRemoval(entries) {
       retrySaveButton.hidden = false;
       throw new Error("自动保存失败，请检查登录状态或云端冲突提示");
     }
-    note.textContent = `已删除 ${removed} 个图标，并已自动保存到云端。`;
+    note.textContent = "云端同步完成。";
     note.className = "icon-validity-note is-success";
     setSummary(`已删除 ${removed} 个图标，并已自动保存。`, "success");
     return removed;
@@ -234,7 +234,7 @@ async function retrySave() {
   setSummary("正在重试保存删除结果…", "running");
   try {
     if (!await admin.save()) throw new Error("自动保存失败，请检查登录状态或云端冲突提示");
-    note.textContent = "删除结果已成功保存到云端。";
+    note.textContent = "云端同步完成。";
     note.className = "icon-validity-note is-success";
     setSummary("删除结果已保存。", "success");
   } catch (error) {
