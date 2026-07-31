@@ -2626,6 +2626,19 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   min-width: 0;
 }
 
+.icon-validity-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.icon-validity-item-actions .is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .icon-validity-item h3 {
   margin: 0 0 4px;
   font-size: 15px;
@@ -2705,8 +2718,13 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   }
 
   .icon-validity-item .button {
+    width: 100%;
+  }
+
+  .icon-validity-item-actions {
     grid-column: 1 / -1;
     width: 100%;
+    flex-direction: column;
   }
 }
 

@@ -9,8 +9,8 @@ const note = document.querySelector("#icon-validity-note");
 const list = document.querySelector("#icon-validity-list");
 const empty = document.querySelector("#icon-validity-empty");
 
-const MAX_CONCURRENCY = 8;
-const LOAD_TIMEOUT = 12000;
+const MAX_CONCURRENCY = 16;
+const LOAD_TIMEOUT = 10000;
 let invalidEntries = [];
 let activeScan = null;
 let scanSequence = 0;
@@ -46,7 +46,7 @@ function checkImage(url, signal) {
   return new Promise((resolve) => {
     const image = new Image();
     let settled = false;
-    const timer = window.setTimeout(() => finish(false, "加载超时（超过 12 秒）"), LOAD_TIMEOUT);
+    const timer = window.setTimeout(() => finish(false, "加载超时（超过 10 秒）"), LOAD_TIMEOUT);
 
     function finish(valid, reason = "") {
       if (settled) return;
@@ -65,6 +65,7 @@ function checkImage(url, signal) {
 
     signal.addEventListener("abort", abort, { once: true });
     image.referrerPolicy = "no-referrer";
+    image.decoding = "async";
     image.onload = () => finish(image.naturalWidth > 0 && image.naturalHeight > 0, "图片尺寸无效");
     image.onerror = () => finish(false, "无法加载图片或网站图标");
     image.src = url;
@@ -108,14 +109,32 @@ function createInvalidEntryArticle(entry) {
   url.textContent = entry.icon.url || "（空地址）";
   content.append(title, reason, url);
 
+  const actions = document.createElement("div");
+  actions.className = "icon-validity-item-actions";
+
+  const openLink = document.createElement("a");
+  openLink.className = "button button-secondary";
+  openLink.textContent = "新标签打开";
+  const urlError = getUrlError(entry.icon.url);
+  if (!urlError) {
+    openLink.href = entry.icon.url.trim();
+    openLink.target = "_blank";
+    openLink.rel = "noopener noreferrer";
+  } else {
+    openLink.setAttribute("aria-disabled", "true");
+    openLink.classList.add("is-disabled");
+    openLink.textContent = "地址无效";
+  }
+
   const action = document.createElement("button");
   action.className = "button button-danger";
   action.type = "button";
   action.disabled = Boolean(activeScan) || removalSaving;
   action.textContent = "删除";
   action.addEventListener("click", () => removeEntry(entry));
+  actions.append(openLink, action);
 
-  article.append(image, content, action);
+  article.append(image, content, actions);
   return article;
 }
 
