@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Emby Icons</title>
+  <rect width="64" height="64" rx="14" fill="#07100e"/>
+  <path fill="#8ce0bf" d="M18 14h29v8H27v6h17v8H27v6h20v8H18z"/>
+  <path fill="#dffaf0" d="M18 14h8v36h-8z" opacity=".2"/>
+</svg>
