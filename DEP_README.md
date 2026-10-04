@@ -118,6 +118,20 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 
 审核通过前，普通用户不能修改正式图标库；管理员整份 JSON 保存接口仍然只接受 `ADMIN_TOKEN`。系统会在管理员保存或审核发布前，将旧版本写入 D1 的 `document_versions` 表，并在 `audit_logs` 中记录操作。
 
+### 图标名称唯一（ICON_NAME_CONFLICT）
+
+图标名称在所有写入入口都强制唯一（`functions/_shared/icons.js` 的 `normalizeIconName` 统一规范化：NFKC 全角半角折叠、连续/首尾空白压缩、大小写折叠）。管理员整份 JSON 保存、导入去重与提交审核共用同一套判定。
+
+审核通过时如果与已发布图标同名，接口返回结构化 `409`：
+
+```json
+{ "error": "…", "code": "ICON_NAME_CONFLICT", "conflict": { "index": 0, "name": "OkEmby", "url": "…" }, "suggestions": ["OkEmby02", "OkEmby03"] }
+```
+
+审核界面会预检冲突并提供三种处理方式：**改名后通过**（`approve-rename`，默认填入 `suggestions[0]`，如 `OkEmby02`）、**替换现有**（`replace`，覆盖同名条目的名称与图片地址，并清理其余同名重复项）、**拒绝**（`reject`）。
+
+为修复审核失败后 KV/D1 不一致：当图标已写入 KV 但 D1 状态更新失败时，提交**不会**回退为 `pending`（避免重复发布的死循环），而是返回 `PUBLISH_RECOVERY_REQUIRED` 并保留 `approving` 状态；重试时会命中幂等分支直接补写 D1。
+
 ## 原始导入地址
 
 - <https://raw.githubusercontent.com/arlettebrook/emby-icons/refs/heads/main/emby-icons.json>

@@ -1,7 +1,12 @@
 import {
+  STORAGE_KEY,
+  buildIconNameConflict,
   createEtag,
+  findIconNameConflict,
+  normalizeIconName,
   readDocument,
   saveDocumentSnapshot,
+  suggestIconNames,
   writeAuditLog,
 } from "./icons.js";
 import { hasAdminAccess } from "./admin.js";
@@ -188,6 +193,30 @@ async function releasePublicationLock(env, owner) {
   await env.DB.prepare("DELETE FROM document_publish_lock WHERE lock_name = 'canonical' AND owner = ?1").bind(owner).run();
 }
 
+async function resetToPending(env, id) {
+  try {
+    await env.DB
+      .prepare("UPDATE submissions SET status = 'pending' WHERE id = ?1 AND status = 'approving'")
+      .bind(id)
+      .run();
+  } catch {
+    // Best-effort rollback; the publication lock TTL will recover the row.
+  }
+}
+
+async function finalizeApproval(env, id, reviewerId, name) {
+  const updated = await env.DB
+    .prepare(
+      "UPDATE submissions SET status = 'approved', name = ?1, reviewer_id = ?2, reviewed_at = ?3 WHERE id = ?4 AND status IN ('approving', 'pending')",
+    )
+    .bind(name, reviewerId, Date.now(), id)
+    .run();
+  if (updated.meta?.changes) return true;
+  const latest = await readSubmission(env, id);
+  if (latest?.status === "approved") return true;
+  throw new Error("Submission state changed while publishing");
+}
+
 export async function handleSubmissionCreate(request, env, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
@@ -296,7 +325,42 @@ export async function handleAdminSubmissionList(request, env) {
   const result = status === "all"
     ? await env.DB.prepare(query).bind(limit).all()
     : await env.DB.prepare(query).bind(status, limit).all();
-  return jsonResponse(request, env, { submissions: result.results || [] });
+  const rows = result.results || [];
+
+  // Pre-check the pending queue against the published document so reviewers see
+  // name conflicts before they try to approve. A broken/unavailable KV must not
+  // take down the whole review queue.
+  let icons = null;
+  if (env.EMBY_ICONS && (status === "pending" || status === "all")) {
+    try {
+      const current = await readDocument(env);
+      if (current.text !== null) {
+        const document = JSON.parse(current.text);
+        if (Array.isArray(document?.icons)) icons = document.icons;
+      }
+    } catch {
+      icons = null;
+    }
+  }
+
+  const submissions = icons
+    ? rows.map((row) => {
+        const conflict = findIconNameConflict(icons, row.name);
+        if (!conflict) return { ...row, conflict: null };
+        return {
+          ...row,
+          conflict: {
+            index: conflict.index,
+            name: conflict.name,
+            url: conflict.url,
+            sameUrl: conflict.url === row.url,
+          },
+          suggestions: suggestIconNames(row.name, icons, 2),
+        };
+      })
+    : rows;
+
+  return jsonResponse(request, env, { submissions });
 }
 
 export async function handleAdminSubmissionDecision(request, env, id) {
@@ -313,14 +377,18 @@ export async function handleAdminSubmissionDecision(request, env, id) {
   } catch (error) {
     return jsonResponse(request, env, { error: error.message }, { status: 400 });
   }
+
   const action = body.action;
-  if (!["approve", "reject"].includes(action)) return jsonResponse(request, env, { error: "action must be approve or reject" }, { status: 400 });
-  if (row.status !== "pending") return jsonResponse(request, env, { error: "Only pending submissions can be reviewed" }, { status: 409 });
+  if (!["approve", "approve-rename", "replace", "reject"].includes(action)) {
+    return jsonResponse(request, env, { error: "action must be approve, approve-rename, replace or reject" }, { status: 400 });
+  }
 
   const reviewerId = "admin";
+  const note = body.note === undefined ? "" : trimString(body.note, "note", MAX_NOTE_LENGTH, false);
+  if (typeof note !== "string") return jsonResponse(request, env, { error: note }, { status: 400 });
+
   if (action === "reject") {
-    const note = body.note === undefined ? "" : trimString(body.note, "note", MAX_NOTE_LENGTH, false);
-    if (typeof note !== "string") return jsonResponse(request, env, { error: note }, { status: 400 });
+    if (row.status !== "pending") return jsonResponse(request, env, { error: "Only pending submissions can be reviewed" }, { status: 409 });
     await env.DB.prepare(
       "UPDATE submissions SET status = 'rejected', reviewer_id = ?1, reviewer_note = ?2, reviewed_at = ?3 WHERE id = ?4 AND status = 'pending'",
     )
@@ -330,56 +398,143 @@ export async function handleAdminSubmissionDecision(request, env, id) {
     return jsonResponse(request, env, { ok: true, status: "rejected" });
   }
 
-  const claimed = await env.DB.prepare("UPDATE submissions SET status = 'approving' WHERE id = ?1 AND status = 'pending'").bind(id).run();
-  if (!claimed.meta?.changes) return jsonResponse(request, env, { error: "Submission is already being reviewed" }, { status: 409 });
+  if (row.status === "rejected" || row.status === "withdrawn") {
+    return jsonResponse(request, env, { error: "Only pending submissions can be reviewed" }, { status: 409 });
+  }
+  if (row.status === "approved") {
+    return jsonResponse(request, env, { ok: true, status: "approved", alreadyPublished: true });
+  }
+
+  let effectiveName = row.name;
+  if (action === "approve-rename") {
+    const nameResult = trimString(body.name, "name", MAX_NAME_LENGTH);
+    if (typeof nameResult !== "string") return jsonResponse(request, env, { error: nameResult }, { status: 400 });
+    effectiveName = nameResult;
+  }
+
+  if (row.status === "pending") {
+    const claimed = await env.DB.prepare("UPDATE submissions SET status = 'approving' WHERE id = ?1 AND status = 'pending'").bind(id).run();
+    if (!claimed.meta?.changes) return jsonResponse(request, env, { error: "Submission is already being reviewed" }, { status: 409 });
+  }
 
   const lockOwner = `submission:${id}:${crypto.randomUUID()}`;
   let lockAcquired = false;
   try {
     lockAcquired = await acquirePublicationLock(env, lockOwner);
   } catch (error) {
-    await env.DB.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?1 AND status = 'approving'").bind(id).run();
+    await resetToPending(env, id);
     return jsonResponse(request, env, { error: error.message || "Publication lock is unavailable" }, { status: 503 });
   }
   if (!lockAcquired) {
-    await env.DB.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?1 AND status = 'approving'").bind(id).run();
+    if (row.status === "pending") await resetToPending(env, id);
     return jsonResponse(request, env, { error: "Another publication is in progress; try again" }, { status: 409 });
   }
 
+  let published = false;
+  let publishedCount = null;
   try {
     if (!env.EMBY_ICONS) throw new Error("EMBY_ICONS KV is not configured");
     const current = await readDocument(env);
     const document = current.text === null
       ? { name: "Emby Icons", description: "", icons: [] }
       : JSON.parse(current.text);
-    if (!Array.isArray(document.icons)) throw new Error("Published icon document is invalid");
-    const duplicate = document.icons.some((icon) => icon.name?.trim().toLocaleLowerCase() === row.name.trim().toLocaleLowerCase());
-    if (duplicate) {
-      await env.DB.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?1 AND status = 'approving'").bind(id).run();
-      return jsonResponse(request, env, { error: "An icon with the same name already exists" }, { status: 409 });
+    if (!document || typeof document !== "object" || Array.isArray(document) || !Array.isArray(document.icons)) {
+      throw new Error("Published icon document is invalid");
     }
-    document.icons.push({ name: row.name, url: row.url });
+
+    const conflict = findIconNameConflict(document.icons, effectiveName);
+
+    // Idempotent retry: a previous attempt may have written KV but failed before
+    // updating D1. Matching name + URL means the submission is already published.
+    if (conflict && conflict.url === row.url) {
+      await finalizeApproval(env, id, reviewerId, conflict.name);
+      await writeAuditLog(env, {
+        actorId: reviewerId,
+        action: "submission-approved",
+        targetId: id,
+        details: { name: conflict.name, url: conflict.url, alreadyPublished: true },
+      });
+      return jsonResponse(request, env, { ok: true, status: "approved", alreadyPublished: true, count: document.icons.length });
+    }
+
+    if (conflict && action !== "replace") {
+      await resetToPending(env, id);
+      return jsonResponse(
+        request,
+        env,
+        buildIconNameConflict({ name: effectiveName, conflict, icons: document.icons, count: 2 }),
+        { status: 409 },
+      );
+    }
+
+    if (conflict) {
+      const key = normalizeIconName(effectiveName);
+      const replaced = document.icons.map((icon, index) =>
+        index === conflict.index ? { ...icon, name: effectiveName, url: row.url } : icon,
+      );
+      document.icons = replaced.filter((icon, index) => index === conflict.index || normalizeIconName(icon?.name) !== key);
+    } else {
+      document.icons.push({ name: effectiveName, url: row.url });
+    }
+
     const serialized = `${JSON.stringify(document, null, 2)}\n`;
+    const serializedEtag = await createEtag(serialized);
     await saveDocumentSnapshot(env, current.text, reviewerId, `approve-submission:${id}`);
-    await env.EMBY_ICONS.put("emby-icons.json", serialized);
-    const updated = await env.DB.prepare(
-      "UPDATE submissions SET status = 'approved', reviewer_id = ?1, reviewed_at = ?2 WHERE id = ?3 AND status = 'approving'",
-    )
-      .bind(reviewerId, Date.now(), id)
-      .run();
-    if (!updated.meta?.changes) throw new Error("Submission state changed while publishing");
+    await env.EMBY_ICONS.put(STORAGE_KEY, serialized);
+    published = true;
+    publishedCount = document.icons.length;
+
+    await finalizeApproval(env, id, reviewerId, effectiveName);
     await writeAuditLog(env, {
       actorId: reviewerId,
       action: "submission-approved",
       targetId: id,
-      details: { name: row.name, url: row.url, etag: await createEtag(serialized) },
+      details: {
+        name: effectiveName,
+        url: row.url,
+        etag: serializedEtag,
+        ...(conflict ? { replaced: { name: conflict.name, url: conflict.url } } : {}),
+      },
     });
-    return jsonResponse(request, env, { ok: true, status: "approved", count: document.icons.length }, { status: 200, headers: { ETag: await createEtag(serialized) } });
+    return jsonResponse(
+      request,
+      env,
+      { ok: true, status: "approved", count: document.icons.length, replaced: Boolean(conflict) },
+      { status: 200, headers: { ETag: serializedEtag } },
+    );
   } catch (error) {
-    await env.DB.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?1 AND status = 'approving'").bind(id).run();
-    return jsonResponse(request, env, { error: error.message || "Failed to publish submission" }, { status: 500 });
+    if (!published) {
+      await resetToPending(env, id);
+      return jsonResponse(request, env, { error: error.message || "Failed to publish submission" }, { status: 500 });
+    }
+    // KV already contains the icon. Reconcile D1 instead of returning the
+    // submission to "pending" (which is what caused the duplicate-name loop).
+    try {
+      await finalizeApproval(env, id, reviewerId, effectiveName);
+      await writeAuditLog(env, {
+        actorId: reviewerId,
+        action: "submission-approved",
+        targetId: id,
+        details: { name: effectiveName, url: row.url, recovered: true },
+      });
+      return jsonResponse(request, env, { ok: true, status: "approved", count: publishedCount, recovered: true });
+    } catch (recoveryError) {
+      return jsonResponse(
+        request,
+        env,
+        {
+          error: `图标已写入 KV，但提交状态更新失败：${recoveryError.message || "未知错误"}。请重试以完成同步。`,
+          code: "PUBLISH_RECOVERY_REQUIRED",
+        },
+        { status: 500 },
+      );
+    }
   } finally {
-    await releasePublicationLock(env, lockOwner);
+    try {
+      await releasePublicationLock(env, lockOwner);
+    } catch {
+      // Lock rows expire on their own (30s TTL).
+    }
   }
 }
 

@@ -286,11 +286,11 @@ async function importDocument(event) {
     if (activeTab === "json" && !syncFromJson()) throw new Error("请先修正当前 JSON 错误");
     if (activeTab !== "json") syncStructuredFields();
 
-    const existingNames = new Set(documentData.icons.map((icon) => icon.name.trim().toLocaleLowerCase()));
+    const existingNames = new Set(documentData.icons.map((icon) => normalizeIconName(icon.name)));
     const additions = [];
     let skipped = 0;
     for (const icon of importedIcons) {
-      const key = icon.name.toLocaleLowerCase();
+      const key = normalizeIconName(icon.name);
       if (existingNames.has(key)) {
         skipped += 1;
         continue;
@@ -423,17 +423,28 @@ function setBusy(value) {
     : defaultSaveLabel;
 }
 
+function normalizeIconName(name) {
+  if (typeof name !== "string") return "";
+  return name.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
 function validDocument(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "根节点必须是 JSON 对象";
   if (typeof value.name !== "string" || !value.name.trim()) return "name 必须是非空字符串";
   if (typeof value.description !== "string") return "description 必须是字符串";
   if (!Array.isArray(value.icons)) return "icons 必须是数组";
 
+  const seenNames = new Map();
   for (let index = 0; index < value.icons.length; index += 1) {
     const icon = value.icons[index];
     if (!icon || typeof icon !== "object" || Array.isArray(icon)) return `icons[${index}] 必须是对象`;
     if (typeof icon.name !== "string" || !icon.name.trim()) return `第 ${index + 1} 项缺少名称`;
     if (typeof icon.url !== "string" || !icon.url.trim()) return `第 ${index + 1} 项缺少图片地址`;
+    const nameKey = normalizeIconName(icon.name);
+    if (seenNames.has(nameKey)) {
+      return `第 ${index + 1} 项名称与第 ${seenNames.get(nameKey) + 1} 项重复（忽略大小写与多余空格）`;
+    }
+    seenNames.set(nameKey, index);
     try {
       const url = new URL(icon.url);
       if (!["http:", "https:"].includes(url.protocol)) return `第 ${index + 1} 项图片地址无效`;

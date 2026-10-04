@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handleGet, handlePut } from "../functions/_shared/icons.js";
+import {
+  findDuplicateIcon,
+  findIconNameConflict,
+  handleGet,
+  handlePut,
+  normalizeIconName,
+  suggestIconNames,
+} from "../functions/_shared/icons.js";
 import { createAdminSession } from "../functions/_shared/admin.js";
 
 const seed = {
@@ -176,4 +183,59 @@ test("PUT rejects invalid icon URLs", async () => {
 
   const response = await handlePut(request, env);
   assert.equal(response.status, 400);
+});
+
+test("normalizeIconName folds width, whitespace, case and unicode form", () => {
+  assert.equal(normalizeIconName("  ＯｋEmby  "), "okemby");
+  assert.equal(normalizeIconName("OkEmby\t 02"), "okemby 02");
+  assert.equal(normalizeIconName("Kelvin"), "kelvin");
+  assert.equal(normalizeIconName(undefined), "");
+});
+
+test("findIconNameConflict and findDuplicateIcon use the shared normalization", () => {
+  const icons = [
+    { name: "OkEmby", url: "https://example.com/1.png" },
+    { name: "Other", url: "https://example.com/2.png" },
+  ];
+  assert.deepEqual(findIconNameConflict(icons, " okemby "), { index: 0, name: "OkEmby", url: "https://example.com/1.png" });
+  assert.equal(findIconNameConflict(icons, "Missing"), null);
+  assert.equal(findDuplicateIcon(icons), null);
+
+  const duplicated = [...icons, { name: "ＯＫＥＭＢＹ", url: "https://example.com/3.png" }];
+  const duplicate = findDuplicateIcon(duplicated);
+  assert.equal(duplicate.index, 2);
+  assert.equal(duplicate.firstIndex, 0);
+});
+
+test("suggestIconNames appends two-digit suffixes and skips taken names", () => {
+  assert.deepEqual(suggestIconNames("OkEmby", []), ["OkEmby02", "OkEmby03"]);
+  assert.deepEqual(suggestIconNames("OkEmby", ["OkEmby02"]), ["OkEmby03", "OkEmby04"]);
+  assert.deepEqual(suggestIconNames("OkEmby02", []), ["OkEmby03", "OkEmby04"]);
+  assert.deepEqual(suggestIconNames("OkEmby", [{ name: "okemby02" }, { name: "OKEMBY03" }], 2), ["OkEmby04", "OkEmby05"]);
+  assert.deepEqual(suggestIconNames("", []), []);
+});
+
+test("PUT rejects documents with duplicate normalized icon names", async () => {
+  const env = createEnvironment();
+  const duplicated = {
+    ...seed,
+    icons: [
+      { name: "OkEmby", url: "https://example.com/1.png" },
+      { name: " okemby ", url: "https://example.com/2.png" },
+    ],
+  };
+  const response = await handlePut(new Request("https://example.com/api/icons", {
+    method: "PUT",
+    headers: {
+      Authorization: "Bearer secret-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(duplicated),
+  }), env);
+
+  assert.equal(response.status, 409);
+  const body = await response.json();
+  assert.equal(body.code, "ICON_NAME_CONFLICT");
+  assert.equal(body.conflict.name, "OkEmby");
+  assert.equal(body.conflict.index, 0);
 });

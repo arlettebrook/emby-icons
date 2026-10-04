@@ -1,8 +1,99 @@
 import { hasAdminAccess } from "./admin.js";
 import { readGithubProxySettings, transformGithubProxyDocument } from "./github-proxy.js";
 
-const STORAGE_KEY = "emby-icons.json";
+export const STORAGE_KEY = "emby-icons.json";
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
+
+/**
+ * Canonical icon-name normalization used everywhere name uniqueness matters:
+ * server validation, submission approval and the admin import/dedup UI.
+ */
+export function normalizeIconName(name) {
+  if (typeof name !== "string") return "";
+  return name.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+export function findIconNameConflict(icons, name) {
+  const key = normalizeIconName(name);
+  if (!key || !Array.isArray(icons)) return null;
+  for (let index = 0; index < icons.length; index += 1) {
+    const icon = icons[index];
+    if (icon && normalizeIconName(icon.name) === key) {
+      return { index, name: icon.name, url: icon.url };
+    }
+  }
+  return null;
+}
+
+export function findDuplicateIcon(icons) {
+  if (!Array.isArray(icons)) return null;
+  const seen = new Map();
+  for (let index = 0; index < icons.length; index += 1) {
+    const icon = icons[index];
+    const key = normalizeIconName(icon?.name);
+    if (!key) continue;
+    const record = {
+      index,
+      name: typeof icon?.name === "string" ? icon.name : "",
+      url: typeof icon?.url === "string" ? icon.url : "",
+    };
+    if (seen.has(key)) {
+      const first = seen.get(key);
+      return { ...record, firstIndex: first.index, firstName: first.name, firstUrl: first.url };
+    }
+    seen.set(key, record);
+  }
+  return null;
+}
+
+/**
+ * Produce candidate names such as "OkEmby02", "OkEmby03" for "OkEmby".
+ * A trailing numeric suffix is treated as a counter so "OkEmby02" would
+ * suggest "OkEmby03", "OkEmby04", ... instead of "OkEmby0202".
+ */
+export function suggestIconNames(name, taken, count = 2) {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return [];
+  const takenKeys = new Set();
+  for (const entry of Array.isArray(taken) ? taken : []) {
+    const value = entry && typeof entry === "object" ? entry.name : entry;
+    const key = normalizeIconName(value);
+    if (key) takenKeys.add(key);
+  }
+
+  const match = trimmed.match(/^(.*?)[\s._-]*(\d+)$/u);
+  let stem = trimmed;
+  let startAt = 2;
+  if (match && match[1].trim()) {
+    stem = match[1].replace(/[\s._-]+$/u, "").trim();
+    startAt = Number(match[2]) + 1;
+  }
+
+  const suggestions = [];
+  const start = Math.max(startAt, 2);
+  for (let n = start; n < start + 1000 && suggestions.length < count; n += 1) {
+    const candidate = `${stem}${String(n).padStart(2, "0")}`;
+    if (!takenKeys.has(normalizeIconName(candidate))) suggestions.push(candidate);
+  }
+  return suggestions;
+}
+
+export function buildIconNameConflict({ name, conflict, icons, count = 2 } = {}) {
+  return {
+    error: `图标名称“${name}”已存在，请改名后重试或选择替换。`,
+    code: "ICON_NAME_CONFLICT",
+    conflict: conflict ? { index: conflict.index, name: conflict.name, url: conflict.url } : null,
+    suggestions: suggestIconNames(name, icons, count),
+  };
+}
+
+export function buildDuplicateIconConflict(duplicate, icons) {
+  return buildIconNameConflict({
+    name: duplicate?.name || "",
+    conflict: duplicate ? { index: duplicate.firstIndex, name: duplicate.firstName, url: duplicate.firstUrl } : null,
+    icons,
+  });
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,6 +248,11 @@ export async function handlePut(request, env) {
 
   const validationError = validateDocument(document);
   if (validationError) return adminJsonResponse({ error: validationError }, { status: 400 });
+
+  const duplicate = findDuplicateIcon(document.icons);
+  if (duplicate) {
+    return adminJsonResponse(buildDuplicateIconConflict(duplicate, document.icons), { status: 409 });
+  }
 
   const current = await readDocument(env);
   const expectedEtag = request.headers.get("If-Match");
