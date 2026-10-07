@@ -26,6 +26,9 @@ class FakeD1 {
           if (text.startsWith("SELECT id, name, url, note, status")) {
             return db.submissions.get(values[0]) || null;
           }
+          if (text.startsWith("SELECT name FROM submissions WHERE id =")) {
+            return db.submissions.get(values[0]) || null;
+          }
           if (text.startsWith("SELECT owner FROM document_publish_lock")) {
             const lock = db.locks.get("canonical");
             return lock ? { owner: lock.owner } : null;

@@ -219,6 +219,35 @@ function conflictNotice(name, body) {
   return { text: lines.join("\n"), suggestions };
 }
 
+async function readSubmissionName(env, id) {
+  if (!env.DB || !id) return "";
+  try {
+    const row = await env.DB.prepare("SELECT name FROM submissions WHERE id = ?1").bind(id).first();
+    return typeof row?.name === "string" ? row.name.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Manual rename prompt. The example name is always derived from this specific
+ * submission (its own name plus, when known, the conflict suggestion) so the
+ * message never ships a hard-coded sample such as "OkEmby02".
+ */
+function manualRenamePromptText(name, suggestion) {
+  const lines = ["📝 请直接回复新的图标名称"];
+  if (name) lines.push(`当前名称：${name}`);
+  if (suggestion && suggestion !== name) lines.push(`冲突可用：${suggestion}`);
+  lines.push("10 分钟内有效 · 发送 /cancel 可取消");
+  return lines.join("\n");
+}
+
+// The review card already shows the submission name, so the status line only
+// has to state what the next reply should be.
+function manualRenameStatusText() {
+  return "⏳ 等待新名称：请直接回复新的图标名称（/cancel 取消）";
+}
+
 async function readSuggestedName(env, id, index) {
   const raw = await env.EMBY_ICONS.get(conflictStateKey(id));
   if (!raw) return "";
@@ -453,7 +482,11 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     await sendTelegramMessage(
       settings.token,
       settings.chatId,
-      "请直接回复拒绝原因（例如：图片模糊、已有同名图标）。\n也可以发送 /reject 不填原因直接拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。",
+      [
+        "📝 请直接回复拒绝原因（例如：图片模糊、已有同名图标）",
+        "不填原因可直接发送 /reject",
+        "10 分钟内有效 · 发送 /cancel 可取消",
+      ].join("\n"),
     ).catch(() => {});
     return;
   }
@@ -465,9 +498,11 @@ async function handleCallbackUpdate(request, env, settings, callback) {
       messageText: callback.message?.text || callback.message?.caption || "Emby 图标提交",
       createdAt: Date.now(),
     }));
+    const pendingName = await readSubmissionName(env, id);
+    const suggestion = await readSuggestedName(env, id, 0);
     await answerCallback(settings.token, callback.id, "请回复新的图标名称").catch(() => {});
-    await editTelegramSubmission(settings.token, callback.message, "⏳ 等待新名称：请直接回复新的图标名称").catch(() => {});
-    await sendTelegramMessage(settings.token, settings.chatId, "请直接回复新的图标名称（例如 OkEmby02）。10 分钟内有效，发送 /cancel 可取消本次改名。").catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, manualRenameStatusText()).catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, manualRenamePromptText(pendingName, suggestion)).catch(() => {});
     return;
   }
 

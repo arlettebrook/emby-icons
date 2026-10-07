@@ -185,6 +185,47 @@ test("manual rename via Telegram publishes under the typed name", async () => {
   }
 });
 
+test("manual rename prompt uses the submission name instead of a fixed example", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "MyEmbyIcon", "https://example.com/new.png");
+
+    await callback(secret, env, `rename-manual:${id}`);
+
+    const prompt = mock.method("sendMessage").at(-1).payload.text;
+    assert.match(prompt, /请直接回复新的图标名称/);
+    assert.match(prompt, /当前名称：MyEmbyIcon/);
+    assert.match(prompt, /\/cancel/);
+    assert.doesNotMatch(prompt, /OkEmby02/);
+
+    const edit = mock.method("editMessageText").at(-1);
+    assert.match(edit.payload.text, /等待新名称/);
+    assert.doesNotMatch(edit.payload.text, /例如 OkEmby02/);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("manual rename prompt offers the conflict suggestion derived from that submission", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+    await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
+
+    await callback(secret, env, `rename-manual:${id}`);
+
+    const prompt = mock.method("sendMessage").at(-1).payload.text;
+    assert.match(prompt, /当前名称：OkEmby/);
+    assert.match(prompt, /冲突可用：OkEmby\d{2}/);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("manual rename that still conflicts stays open and redraws the buttons", async () => {
   mock = installTelegramFetchMock();
   try {
