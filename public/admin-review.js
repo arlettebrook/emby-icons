@@ -179,7 +179,9 @@ async function decide(id, action, actions, { note = "", name = "" } = {}) {
         const suggestions = Array.isArray(body.suggestions) && body.suggestions.length
           ? `，可尝试：${body.suggestions.join("、")}`
           : "";
-        throw new Error(`${body.error || "图标名称冲突"}${suggestions}`);
+        await loadQueue();
+        setStatus(`${body.error || "图标名称冲突"}${suggestions}`, true);
+        return;
       }
       throw new Error(body.error || `操作失败（${response.status}）`);
     }

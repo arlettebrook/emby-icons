@@ -7,7 +7,7 @@
     "build": "node scripts/build.js",
     "dev": "wrangler pages dev public --kv EMBY_ICONS --d1 DB=emby-icons-local --persist-to .wrangler/state",
     "db:migrate:local": "wrangler d1 migrations apply emby-icons-local --local --persist-to .wrangler/state",
-    "test": "node --test"
+    "test": "node --test test/admin-auth.test.js test/github-proxy.test.js test/icons.test.js test/import.test.js test/submissions.test.js test/telegram.test.js"
   },
   "devDependencies": {
     "wrangler": "^4.26.1"

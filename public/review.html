@@ -21,6 +21,9 @@
       .review-actions { display: flex; gap: 8px; }
       .review-actions .danger { border-color: rgb(255 113 140 / 45%); color: var(--danger); }
       .review-status { color: var(--muted); }
+      .moderation-conflict { margin-top: 9px; padding: 9px 11px; border: 1px solid rgb(217 119 6 / 40%); border-radius: 8px; background: rgb(255 247 237 / 94%); color: #92400e; }
+      .moderation-conflict strong { display: block; margin-bottom: 4px; font-size: 12px; }
+      .moderation-conflict p { margin: 2px 0; color: inherit; }
       @media (max-width: 700px) { .review-item { grid-template-columns: 56px minmax(0, 1fr); } .review-item img { width: 52px; height: 52px; } .review-actions { grid-column: 1 / -1; } }
     </style>
   </head>
@@ -36,6 +39,6 @@
       <section class="review-list" id="review-list"></section>
       <p><a href="/admin.html">返回管理员面板</a></p>
     </main>
-    <script type="module" src="/review.js"></script>
+    <script type="module" src="/review.js?v=20261007-ui20"></script>
   </body>
 </html>

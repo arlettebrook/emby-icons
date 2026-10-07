@@ -1,5 +1,5 @@
 import { hasAdminAccess } from "./admin.js";
-import { writeAuditLog } from "./icons.js";
+import { findIconNameConflict, readDocument, suggestIconNames, writeAuditLog } from "./icons.js";
 
 const SETTINGS_KEY = "settings/telegram.json";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -185,6 +185,60 @@ function submissionKeyboard(id) {
   };
 }
 
+function conflictStateKey(id) {
+  return `settings/telegram/conflict/${id}`;
+}
+
+function conflictKeyboard(id, suggestions) {
+  const rows = [];
+  (Array.isArray(suggestions) ? suggestions : []).slice(0, 3).forEach((name, index) => {
+    if (!name) return;
+    rows.push([{ text: `✏️ 改名为 ${name} 并通过`, callback_data: `rename:${id}:${index}` }]);
+  });
+  rows.push([
+    { text: "♻️ 替换现有", callback_data: `replace:${id}` },
+    { text: "❌ 拒绝", callback_data: `reject:${id}` },
+  ]);
+  return { inline_keyboard: rows };
+}
+
+function conflictNotice(name, body) {
+  const suggestions = Array.isArray(body?.suggestions)
+    ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
+    : [];
+  const existing = typeof body?.conflict?.name === "string" ? body.conflict.name : "";
+  const lines = [`⚠️ 名称冲突：图标名「${name}」已存在${existing && existing !== name ? `（现有：${existing}）` : ""}。`];
+  if (suggestions.length) lines.push(`建议改名：${suggestions.join("、")}`);
+  lines.push("请选择处理方式：");
+  return { text: lines.join("\n"), suggestions };
+}
+
+async function readSuggestedName(env, id, index) {
+  const raw = await env.EMBY_ICONS.get(conflictStateKey(id));
+  if (!raw) return "";
+  try {
+    const suggestions = JSON.parse(raw)?.suggestions;
+    return Array.isArray(suggestions) && typeof suggestions[index] === "string" ? suggestions[index] : "";
+  } catch {
+    return "";
+  }
+}
+
+async function findSubmissionConflict(env, name) {
+  if (!env.EMBY_ICONS || !name) return null;
+  try {
+    const current = await readDocument(env);
+    if (current.text === null) return null;
+    const document = JSON.parse(current.text);
+    if (!Array.isArray(document?.icons)) return null;
+    const conflict = findIconNameConflict(document.icons, name);
+    if (!conflict) return null;
+    return { conflict, suggestions: suggestIconNames(name, document.icons, 2) };
+  } catch {
+    return null;
+  }
+}
+
 export async function handleAdminTelegramSettings(request, env) {
   const authError = await requireAdmin(request, env);
   if (authError) return authError;
@@ -287,7 +341,23 @@ export async function notifyNewSubmission(env, submission, origin = "") {
       }).catch(() => {});
     }
   }
-  await sendTelegramMessage(settings.token, settings.chatId, submissionMessage(submission), settings.webhookSecret ? submissionKeyboard(submission.id) : null);
+  let text = submissionMessage(submission);
+  let keyboard = settings.webhookSecret ? submissionKeyboard(submission.id) : null;
+  const existing = await findSubmissionConflict(env, submission.name);
+  if (existing) {
+    const notice = conflictNotice(submission.name, { conflict: existing.conflict, suggestions: existing.suggestions });
+    text = `${text}\n\n${notice.text}`;
+    if (settings.webhookSecret) {
+      await env.EMBY_ICONS.put(conflictStateKey(submission.id), JSON.stringify({
+        id: submission.id,
+        name: submission.name,
+        suggestions: notice.suggestions,
+        createdAt: Date.now(),
+      }));
+      keyboard = conflictKeyboard(submission.id, notice.suggestions);
+    }
+  }
+  await sendTelegramMessage(settings.token, settings.chatId, text, keyboard);
   return true;
 }
 
@@ -334,13 +404,13 @@ async function answerCallback(token, callbackId, text) {
   await telegramApi(token, "answerCallbackQuery", { callback_query_id: callbackId, text, show_alert: false });
 }
 
-async function executeAdminDecision(request, env, id, action, note = "") {
+async function executeAdminDecision(request, env, id, action, note = "", name = "") {
   const { handleAdminSubmissionDecision } = await import("./submissions.js");
   return handleAdminSubmissionDecision(
     new Request(request.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${env.ADMIN_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ action, note }),
+      body: JSON.stringify({ action, note, ...(name ? { name } : {}) }),
     }),
     env,
     id,
@@ -353,34 +423,64 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     await answerCallback(settings.token, callback.id, "此聊天未授权").catch(() => {});
     return;
   }
-  const match = /^(approve|reject):([0-9a-f-]{36})$/i.exec(String(callback.data || ""));
+  const match = /^(approve|reject|replace|rename):([0-9a-f-]{36})(?::(\d{1,2}))?$/i.exec(String(callback.data || ""));
   if (!match) {
     await answerCallback(settings.token, callback.id, "无效的审核操作").catch(() => {});
     return;
   }
-  const [, action, id] = match;
-  if (action.toLowerCase() === "approve") {
-    const response = await executeAdminDecision(request, env, id, "approve");
-    const body = await response.json().catch(() => ({}));
-    if (response.ok) {
-      await answerCallback(settings.token, callback.id, "已通过并发布").catch(() => {});
-      await editTelegramSubmission(settings.token, callback.message, "✅ 已通过并发布").catch(() => {});
-    } else {
-      await answerCallback(settings.token, callback.id, body.error || "发布失败").catch(() => {});
-      await sendTelegramMessage(settings.token, settings.chatId, `审核失败：${body.error || "无法发布该提交"}`).catch(() => {});
-    }
+  const action = match[1].toLowerCase();
+  const id = match[2];
+
+  if (action === "reject") {
+    await env.EMBY_ICONS.put(rejectStateKey(chatId), JSON.stringify({
+      id,
+      messageId: callback.message?.message_id || null,
+      messageText: callback.message?.text || callback.message?.caption || "Emby 图标提交",
+      createdAt: Date.now(),
+    }));
+    await answerCallback(settings.token, callback.id, "请回复拒绝原因").catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, "⏳ 等待拒绝原因：请发送 /reject 拒绝原因").catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, "请发送拒绝指令：\n/reject [可选的拒绝原因]\n\n直接发送 /reject 也可以拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。").catch(() => {});
     return;
   }
 
-  await env.EMBY_ICONS.put(rejectStateKey(chatId), JSON.stringify({
-    id,
-    messageId: callback.message?.message_id || null,
-    messageText: callback.message?.text || callback.message?.caption || "Emby 图标提交",
-    createdAt: Date.now(),
-  }));
-  await answerCallback(settings.token, callback.id, "请回复拒绝原因").catch(() => {});
-  await editTelegramSubmission(settings.token, callback.message, "⏳ 等待拒绝原因：请发送 /reject 拒绝原因").catch(() => {});
-  await sendTelegramMessage(settings.token, settings.chatId, "请发送拒绝指令：\n/reject [可选的拒绝原因]\n\n直接发送 /reject 也可以拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。").catch(() => {});
+  let name = "";
+  if (action === "rename") {
+    name = await readSuggestedName(env, id, Number(match[3] || 0));
+    if (!name) {
+      await answerCallback(settings.token, callback.id, "改名建议已失效，请重新点击“通过并发布”").catch(() => {});
+      return;
+    }
+  }
+
+  const apiAction = action === "rename" ? "approve-rename" : action;
+  const response = await executeAdminDecision(request, env, id, apiAction, "", name);
+  const body = await response.json().catch(() => ({}));
+  if (response.ok) {
+    await env.EMBY_ICONS.delete(conflictStateKey(id)).catch(() => {});
+    const label = action === "replace"
+      ? "♻️ 已替换现有图标并发布"
+      : action === "rename"
+        ? `✅ 已改名为「${name}」并通过`
+        : "✅ 已通过并发布";
+    await answerCallback(settings.token, callback.id, label).catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, label).catch(() => {});
+    return;
+  }
+  if (body.code === "ICON_NAME_CONFLICT") {
+    const notice = conflictNotice(name || body?.conflict?.name || "该图标名称", body);
+    await env.EMBY_ICONS.put(conflictStateKey(id), JSON.stringify({
+      id,
+      name: name || body?.conflict?.name || "",
+      suggestions: notice.suggestions,
+      createdAt: Date.now(),
+    }));
+    await answerCallback(settings.token, callback.id, "名称冲突，请选择处理方式").catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, notice.text, conflictKeyboard(id, notice.suggestions)).catch(() => {});
+    return;
+  }
+  await answerCallback(settings.token, callback.id, body.error || "处理失败").catch(() => {});
+  await sendTelegramMessage(settings.token, settings.chatId, `审核失败：${body.error || "无法处理该提交"}`).catch(() => {});
 }
 
 async function handleMessageUpdate(env, settings, message) {
