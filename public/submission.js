@@ -56,7 +56,9 @@ function renderSubmissionInfo(submission) {
     ["图标 URL", submission.url],
     ["提交时间", new Date(submission.created_at).toLocaleString()],
   ];
-  if (submission.reviewer_note) rows.push(["审核备注", submission.reviewer_note]);
+  if (submission.reviewer_note) {
+    rows.push([submission.status === "rejected" ? "拒绝原因" : "审核备注", submission.reviewer_note]);
+  }
   rows.forEach(([label, value]) => {
     const row = document.createElement("div");
     const strong = document.createElement("strong");

@@ -177,11 +177,16 @@ function submissionMessage(submission) {
 }
 
 function submissionKeyboard(id) {
+  // Every review message can be renamed by hand, not only ones that already
+  // conflict, so a reviewer can pick a better name while approving.
   return {
-    inline_keyboard: [[
-      { text: "✅ 通过并发布", callback_data: `approve:${id}` },
-      { text: "❌ 拒绝", callback_data: `reject:${id}` },
-    ]],
+    inline_keyboard: [
+      [
+        { text: "✅ 通过并发布", callback_data: `approve:${id}` },
+        { text: "❌ 拒绝", callback_data: `reject:${id}` },
+      ],
+      [{ text: "📝 手动输入新名称", callback_data: `rename-manual:${id}` }],
+    ],
   };
 }
 
@@ -444,8 +449,12 @@ async function handleCallbackUpdate(request, env, settings, callback) {
       createdAt: Date.now(),
     }));
     await answerCallback(settings.token, callback.id, "请回复拒绝原因").catch(() => {});
-    await editTelegramSubmission(settings.token, callback.message, "⏳ 等待拒绝原因：请发送 /reject 拒绝原因").catch(() => {});
-    await sendTelegramMessage(settings.token, settings.chatId, "请发送拒绝指令：\n/reject [可选的拒绝原因]\n\n直接发送 /reject 也可以拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。").catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, "⏳ 等待拒绝原因：请直接回复原因").catch(() => {});
+    await sendTelegramMessage(
+      settings.token,
+      settings.chatId,
+      "请直接回复拒绝原因（例如：图片模糊、已有同名图标）。\n也可以发送 /reject 不填原因直接拒绝。10 分钟内有效，发送 /cancel 可取消本次拒绝操作。",
+    ).catch(() => {});
     return;
   }
 
@@ -571,6 +580,40 @@ async function applyManualRename(env, settings, chatId, key, raw, text) {
   await sendTelegramMessage(settings.token, settings.chatId, `改名失败：${body.error || "无法处理该提交"}`);
 }
 
+async function rejectPendingSubmission(env, settings, chatId, key, raw, reasonText) {
+  let pending;
+  try {
+    pending = JSON.parse(raw);
+  } catch {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已失效，请重新点击审核消息中的“拒绝”按钮。");
+    return;
+  }
+  if (Date.now() - Number(pending.createdAt || 0) > 10 * 60 * 1000) {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    await restorePendingSubmission(settings, pending, "⏱️ 拒绝操作已超时，可重新审核。");
+    await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已超时，请重新点击审核消息中的“拒绝”按钮。");
+    return;
+  }
+  const reason = String(reasonText || "").trim();
+  if (reason.length > 1000) {
+    await sendTelegramMessage(settings.token, settings.chatId, "拒绝原因不能超过 1000 个字符。");
+    return;
+  }
+  const response = await executeAdminDecision(new Request("https://telegram-webhook.invalid"), env, pending.id, "reject", reason);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    await sendTelegramMessage(settings.token, settings.chatId, `拒绝失败：${body.error || "无法处理该提交"}`);
+    return;
+  }
+  await env.EMBY_ICONS.delete(key).catch(() => {});
+  const suffix = `❌ 已拒绝\n原因：${reason || "未填写拒绝原因"}`;
+  await sendTelegramMessage(settings.token, settings.chatId, `${suffix}\n编号：${pending.id}`);
+  if (pending.messageId) {
+    await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, suffix).catch(() => {});
+  }
+}
+
 async function handleMessageUpdate(env, settings, message) {
   const chatId = String(message?.chat?.id || "");
   if (!chatId || chatId !== settings.chatId) return;
@@ -595,41 +638,26 @@ async function handleMessageUpdate(env, settings, message) {
     }
     return;
   }
-  if (!/^\/reject(?:@[^\s]+)?(?:\s|$)/i.test(text)) return;
   if (!pendingRaw) {
-    await sendTelegramMessage(settings.token, settings.chatId, "当前没有等待拒绝原因的提交，请先点击审核消息中的“拒绝”按钮。");
-    return;
-  }
-  let pending;
-  try {
-    pending = JSON.parse(pendingRaw);
-  } catch {
-    await env.EMBY_ICONS.delete(key);
-    await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已失效，请重新点击审核消息中的“拒绝”按钮。");
-    return;
-  }
-  if (Date.now() - Number(pending.createdAt || 0) > 10 * 60 * 1000) {
-    await env.EMBY_ICONS.delete(key);
-    await restorePendingSubmission(settings, pending, "⏱️ 拒绝操作已超时，可重新审核。");
-    await sendTelegramMessage(settings.token, settings.chatId, "拒绝操作已超时，请重新点击审核消息中的“拒绝”按钮。");
-    return;
-  }
-  const reason = text.replace(/^\/reject(?:@[^\s]+)?/i, "").trim();
-  if (reason.length > 1000) {
-    await sendTelegramMessage(settings.token, settings.chatId, "拒绝原因不能超过 1000 个字符。");
-    return;
-  }
-  const response = await executeAdminDecision(new Request("https://telegram-webhook.invalid"), env, pending.id, "reject", reason);
-  const body = await response.json().catch(() => ({}));
-  if (response.ok) {
-    await env.EMBY_ICONS.delete(key);
-    await sendTelegramMessage(settings.token, settings.chatId, `❌ 已拒绝提交\n编号：${pending.id}\n原因：${reason || "未填写拒绝原因"}`);
-    if (pending.messageId) {
-      await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, `❌ 已拒绝\n原因：${reason || "未填写拒绝原因"}`).catch(() => {});
+    if (/^\/reject(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+      await sendTelegramMessage(settings.token, settings.chatId, "当前没有等待拒绝原因的提交，请先点击审核消息中的“拒绝”按钮。");
     }
-  } else {
-    await sendTelegramMessage(settings.token, settings.chatId, `拒绝失败：${body.error || "无法处理该提交"}`);
+    return;
   }
+  // Bare /reject or /skip rejects without a reason.
+  if (/^\/reject(?:@[^\s]+)?$/i.test(text) || text.toLowerCase() === "/skip") {
+    await rejectPendingSubmission(env, settings, chatId, key, pendingRaw, "");
+    return;
+  }
+  if (/^\/reject(?:@[^\s]+)?\s+/i.test(text)) {
+    await rejectPendingSubmission(env, settings, chatId, key, pendingRaw, text.replace(/^\/reject(?:@[^\s]+)?/i, ""));
+    return;
+  }
+  if (text.startsWith("/")) {
+    await sendTelegramMessage(settings.token, settings.chatId, "请直接回复拒绝原因，或发送 /reject 不填原因直接拒绝，发送 /cancel 取消本次拒绝。");
+    return;
+  }
+  await rejectPendingSubmission(env, settings, chatId, key, pendingRaw, text);
 }
 
 export async function handleTelegramWebhook(request, env, secretParam) {

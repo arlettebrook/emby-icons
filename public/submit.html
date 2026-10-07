@@ -25,6 +25,7 @@
       .name-hint.ok { color: var(--accent-strong); }
       .name-hint.conflict { padding: 10px 12px; border: 1px solid rgb(255 113 140 / 42%); border-radius: 8px; background: rgb(255 113 140 / 10%); color: var(--danger); }
       .name-hint-label { display: block; margin-top: 4px; }
+      .name-example { display: block; align-self: start; margin-top: -8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
       .name-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
       .name-suggestion { padding: 4px 12px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
       .name-suggestion:hover { background: rgb(255 255 255 / 10%); }
@@ -52,7 +53,8 @@
         <h1>提交一个图标</h1>
         <p>提交内容会进入审核队列。审核通过后才会出现在公开图标库中。请使用图标的 HTTPS 直链。</p>
         <form class="standalone-form" id="submission-form">
-          <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" required autocomplete="off" /></label>
+          <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" placeholder="请输入图标名称" required autocomplete="off" /></label>
+          <small class="name-example" id="name-example">名称需唯一；重名时会按你输入的名称给出建议。</small>
           <span class="name-hint" id="name-hint" hidden></span>
           <label class="field"><span>图标 URL</span><input id="url" name="url" type="url" maxlength="2048" placeholder="https://example.com/icon.png" required autocomplete="url" /></label>
           <label class="field"><span>补充说明（可选）</span><textarea id="note" name="note" maxlength="1000"></textarea></label>
@@ -67,6 +69,6 @@
       // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submit.js?v=20261007-ui21"></script>
+    <script type="module" src="/submit.js?v=20261007-ui23"></script>
   </body>
 </html>

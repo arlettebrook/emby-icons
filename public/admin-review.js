@@ -10,10 +10,22 @@ const telegramChatId = document.querySelector("#telegram-chat-id");
 const telegramTokenNote = document.querySelector("#telegram-token-note");
 const telegramStatus = document.querySelector("#telegram-settings-status");
 const telegramSaveButton = document.querySelector("#telegram-save-button");
+const filter = document.querySelector("#moderation-filter");
 
 function adminHeaders() {
   const token = sessionStorage.getItem("emby-icons-admin-token") || "";
   return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+}
+
+function statusLabel(status) {
+  return {
+    pending: "待审核",
+    approving: "发布中",
+    approved: "已通过",
+    rejected: "已拒绝",
+    withdrawn: "已撤回",
+    all: "全部",
+  }[status] || status;
 }
 
 function setStatus(message, error = false) {
@@ -91,10 +103,21 @@ function makeItem(item) {
   note.textContent = item.note ? `说明：${item.note}` : "没有补充说明";
   content.append(name, url, note);
 
+  const reviewed = Boolean(item.status) && item.status !== "pending";
+  if (reviewed) {
+    const outcome = document.createElement("p");
+    const reason = item.reviewer_note ? `：${item.reviewer_note}` : "";
+    const when = item.reviewed_at ? `（${new Date(Number(item.reviewed_at)).toLocaleString()}）` : "";
+    outcome.textContent = `审核结果：${statusLabel(item.status)}${reason}${when}`;
+    content.append(outcome);
+  }
+
   const actions = document.createElement("div");
   actions.className = "moderation-actions";
 
-  if (item.conflict) {
+  if (reviewed) {
+    // Reviewed submissions are read-only; the outcome above is enough.
+  } else if (item.conflict) {
     const warning = document.createElement("div");
     warning.className = "moderation-conflict";
     const warningTitle = document.createElement("strong");
@@ -138,7 +161,7 @@ function makeItem(item) {
       await decide(item.id, "replace", actions);
     });
     reject.addEventListener("click", async () => {
-      const noteText = window.prompt("拒绝原因（可选）", "");
+      const noteText = window.prompt("拒绝原因（可留空，会展示给提交者）", "");
       if (noteText !== null) await decide(item.id, "reject", actions, { note: noteText });
     });
     actions.append(rename, replace, reject);
@@ -147,16 +170,31 @@ function makeItem(item) {
     approve.className = "button button-primary";
     approve.type = "button";
     approve.textContent = "通过并发布";
+    const rename = document.createElement("button");
+    rename.className = "button button-secondary";
+    rename.type = "button";
+    rename.textContent = "改名后通过";
     const reject = document.createElement("button");
     reject.className = "button button-secondary danger";
     reject.type = "button";
     reject.textContent = "拒绝";
     approve.addEventListener("click", () => decide(item.id, "approve", actions));
+    rename.addEventListener("click", async () => {
+      const suggested = item.suggestions?.[0] || `${item.name}02`;
+      const nextName = window.prompt("请输入新的图标名称", suggested);
+      if (nextName === null) return;
+      const trimmedName = nextName.trim();
+      if (!trimmedName) {
+        setStatus("图标名称不能为空", true);
+        return;
+      }
+      await decide(item.id, "approve-rename", actions, { name: trimmedName });
+    });
     reject.addEventListener("click", async () => {
-      const noteText = window.prompt("拒绝原因（可选）", "");
+      const noteText = window.prompt("拒绝原因（可留空，会展示给提交者）", "");
       if (noteText !== null) await decide(item.id, "reject", actions, { note: noteText });
     });
-    actions.append(approve, reject);
+    actions.append(approve, rename, reject);
   }
 
   article.append(image, content, actions);
@@ -185,6 +223,11 @@ async function decide(id, action, actions, { note = "", name = "" } = {}) {
       }
       throw new Error(body.error || `操作失败（${response.status}）`);
     }
+    if (action === "reject") {
+      await loadQueue();
+      setStatus(`已拒绝该提交${note.trim() ? `，拒绝原因：${note.trim()}` : "（未填写拒绝原因）"}。`);
+      return;
+    }
     await loadQueue();
   } catch (error) {
     setStatus(error.message, true);
@@ -194,13 +237,14 @@ async function decide(id, action, actions, { note = "", name = "" } = {}) {
 
 async function loadQueue() {
   refreshButton.disabled = true;
-  setStatus("正在加载待审核提交…");
+  const statusFilter = filter?.value || "pending";
+  setStatus(`正在加载${statusLabel(statusFilter)}提交…`);
   try {
-    const response = await fetch("/api/admin/submissions?status=pending", { headers: adminHeaders(), cache: "no-store" });
+    const response = await fetch(`/api/admin/submissions?status=${encodeURIComponent(statusFilter)}`, { headers: adminHeaders(), cache: "no-store" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `加载失败（${response.status}）`);
     list.replaceChildren(...(body.submissions || []).map(makeItem));
-    setStatus(`当前有 ${body.submissions?.length || 0} 条待审核提交。`);
+    setStatus(`当前有 ${body.submissions?.length || 0} 条${statusLabel(statusFilter)}提交。`);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -209,6 +253,7 @@ async function loadQueue() {
 }
 
 refreshButton?.addEventListener("click", loadQueue);
+filter?.addEventListener("change", loadQueue);
 openButton?.addEventListener("click", () => dialog?.showModal());
 closeButton?.addEventListener("click", () => dialog?.close());
 dialog?.addEventListener("click", (event) => {

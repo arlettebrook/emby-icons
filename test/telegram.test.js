@@ -272,3 +272,66 @@ test("webhook ignores callbacks from an unauthorized chat", async () => {
     mock.restore();
   }
 });
+
+test("plain review messages offer a manual rename", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
+    const buttons = mock.method("sendMessage").at(-1).payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    assert.ok(buttons.includes(`approve:${id}`));
+    assert.ok(buttons.includes(`rename-manual:${id}`), "expected a manual rename button on a plain review");
+
+    await callback(secret, env, `rename-manual:${id}`);
+    await message(secret, env, "OkEmby02");
+
+    assert.deepEqual(readKv(env).icons.map((icon) => icon.name), ["OkEmby02"]);
+    assert.equal(env.DB.submissions.get(id).name, "OkEmby02");
+    assert.equal(env.DB.submissions.get(id).status, "approved");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("replying with free text records the rejection reason", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
+    await callback(secret, env, `reject:${id}`);
+    assert.ok(env.__kv.has(`settings/telegram/reject/${CHAT_ID}`), "expected a pending reject state");
+
+    await message(secret, env, "图片模糊，请重新上传");
+
+    const row = env.DB.submissions.get(id);
+    assert.equal(row.status, "rejected");
+    assert.equal(row.reviewer_note, "图片模糊，请重新上传");
+    assert.ok(!env.__kv.has(`settings/telegram/reject/${CHAT_ID}`), "reject state should be cleared");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("bare /reject rejects without a reason", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await callback(secret, env, `reject:${id}`);
+    await message(secret, env, "/reject");
+
+    const row = env.DB.submissions.get(id);
+    assert.equal(row.status, "rejected");
+    assert.equal(row.reviewer_note, "");
+  } finally {
+    mock.restore();
+  }
+});
