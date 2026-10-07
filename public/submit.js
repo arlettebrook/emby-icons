@@ -1,6 +1,8 @@
 const form = document.querySelector("#submission-form");
 const button = document.querySelector("#submit-button");
 const result = document.querySelector("#result");
+const nameInput = document.querySelector("#name");
+const nameHint = document.querySelector("#name-hint");
 let turnstileToken = "";
 
 function showResult(message, error = false) {
@@ -59,8 +61,117 @@ function loadTurnstile() {
   document.head.append(script);
 }
 
+let nameCheckTimer = null;
+let nameCheckSeq = 0;
+let nameCheckState = { value: "", exists: false, suggestions: [] };
+
+function clearNameHint() {
+  clearTimeout(nameCheckTimer);
+  nameCheckState = { value: "", exists: false, suggestions: [] };
+  if (!nameHint) return;
+  nameHint.hidden = true;
+  nameHint.className = "name-hint";
+  nameHint.replaceChildren();
+}
+
+function showNameHint(kind, ...nodes) {
+  if (!nameHint) return;
+  nameHint.hidden = false;
+  nameHint.className = `name-hint ${kind}`.trim();
+  nameHint.replaceChildren(...nodes);
+}
+
+function renderNameConflict(body, value) {
+  const suggestions = Array.isArray(body.suggestions)
+    ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
+    : [];
+  nameCheckState = { value, exists: true, suggestions };
+  const existing = body?.conflict?.name;
+  const message = document.createElement("span");
+  message.textContent = `该名称已存在${existing && existing !== value ? `（现有：${existing}）` : ""}，请换一个名字。`;
+  const nodes = [message];
+  if (suggestions.length) {
+    const label = document.createElement("span");
+    label.className = "name-hint-label";
+    label.textContent = "建议改名（点击填入）：";
+    const group = document.createElement("span");
+    group.className = "name-suggestions";
+    suggestions.forEach((suggestion) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "name-suggestion";
+      chip.textContent = suggestion;
+      chip.addEventListener("click", () => {
+        nameInput.value = suggestion;
+        nameInput.focus();
+        scheduleNameCheck();
+      });
+      group.append(chip);
+    });
+    nodes.push(label, group);
+  }
+  showNameHint("conflict", ...nodes);
+}
+
+async function runNameCheck(value) {
+  const seq = ++nameCheckSeq;
+  try {
+    const response = await fetch(`/api/name-check?name=${encodeURIComponent(value)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (seq !== nameCheckSeq || nameInput.value.trim() !== value) return;
+    if (!response.ok) return;
+    if (body.exists) {
+      renderNameConflict(body, value);
+    } else {
+      nameCheckState = { value, exists: false, suggestions: [] };
+      const ok = document.createElement("span");
+      ok.textContent = "该名称可用 ✓";
+      showNameHint("ok", ok);
+    }
+  } catch {
+    if (seq === nameCheckSeq) {
+      nameCheckState = { value, exists: false, suggestions: [] };
+      nameHint.hidden = true;
+    }
+  }
+}
+
+function scheduleNameCheck() {
+  clearTimeout(nameCheckTimer);
+  const value = nameInput.value.trim();
+  if (!value) { clearNameHint(); return; }
+  nameCheckState = { value, exists: false, suggestions: [] };
+  const pending = document.createElement("span");
+  pending.textContent = "正在检查名称…";
+  showNameHint("pending", pending);
+  nameCheckTimer = setTimeout(() => { runNameCheck(value); }, 350);
+}
+
+if (nameInput && nameHint) {
+  nameInput.addEventListener("input", scheduleNameCheck);
+  nameInput.addEventListener("blur", () => {
+    const value = nameInput.value.trim();
+    if (value && value !== nameCheckState.value) {
+      clearTimeout(nameCheckTimer);
+      runNameCheck(value);
+    }
+  });
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const currentName = nameInput.value.trim();
+  if (nameCheckState.exists && nameCheckState.value === currentName) {
+    const suggestions = (nameCheckState.suggestions || []).join("、");
+    const proceed = window.confirm(`名称「${currentName}」已存在，建议改名为${suggestions || "其他名称"}。仍要按当前名称提交吗？`);
+    if (!proceed) {
+      nameInput.focus();
+      return;
+    }
+  }
   button.disabled = true;
   showResult("正在提交…");
   try {
@@ -87,6 +198,7 @@ form.addEventListener("submit", async (event) => {
     savedSubmissions.unshift({ id: body.submission.id, token: body.accessToken });
     localStorage.setItem("emby-submissions", JSON.stringify(savedSubmissions.slice(0, 30)));
     form.reset();
+    clearNameHint();
     turnstileToken = "";
     showSubmissionSuccess(body.submission, body.accessToken);
   } catch (error) {

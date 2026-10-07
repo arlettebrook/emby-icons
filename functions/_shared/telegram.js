@@ -190,11 +190,12 @@ function conflictStateKey(id) {
 }
 
 function conflictKeyboard(id, suggestions) {
+  const list = (Array.isArray(suggestions) ? suggestions : []).filter((name) => typeof name === "string" && name.trim());
   const rows = [];
-  (Array.isArray(suggestions) ? suggestions : []).slice(0, 3).forEach((name, index) => {
-    if (!name) return;
-    rows.push([{ text: `✏️ 改名为 ${name} 并通过`, callback_data: `rename:${id}:${index}` }]);
-  });
+  // Offer a single one-tap suggestion plus a manual rename so reviewers can
+  // type any name instead of being limited to generated suggestions.
+  if (list[0]) rows.push([{ text: `✏️ 改名为 ${list[0]} 并通过`, callback_data: `rename:${id}:0` }]);
+  rows.push([{ text: "📝 手动输入新名称", callback_data: `rename-manual:${id}` }]);
   rows.push([
     { text: "♻️ 替换现有", callback_data: `replace:${id}` },
     { text: "❌ 拒绝", callback_data: `reject:${id}` },
@@ -378,6 +379,10 @@ function rejectStateKey(chatId) {
   return `settings/telegram/reject/${encodeURIComponent(chatId)}`;
 }
 
+function renameStateKey(chatId) {
+  return `settings/telegram/rename/${encodeURIComponent(chatId)}`;
+}
+
 async function editTelegramSubmission(token, message, suffix, replyMarkup = { inline_keyboard: [] }) {
   if (!message?.chat?.id || !message.message_id) return;
   const original = message.text || message.caption || "Emby 图标提交";
@@ -423,7 +428,7 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     await answerCallback(settings.token, callback.id, "此聊天未授权").catch(() => {});
     return;
   }
-  const match = /^(approve|reject|replace|rename):([0-9a-f-]{36})(?::(\d{1,2}))?$/i.exec(String(callback.data || ""));
+  const match = /^(approve|reject|replace|rename-manual|rename):([0-9a-f-]{36})(?::(\d{1,2}))?$/i.exec(String(callback.data || ""));
   if (!match) {
     await answerCallback(settings.token, callback.id, "无效的审核操作").catch(() => {});
     return;
@@ -444,8 +449,22 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     return;
   }
 
+  if (action === "rename-manual") {
+    await env.EMBY_ICONS.put(renameStateKey(chatId), JSON.stringify({
+      id,
+      messageId: callback.message?.message_id || null,
+      messageText: callback.message?.text || callback.message?.caption || "Emby 图标提交",
+      createdAt: Date.now(),
+    }));
+    await answerCallback(settings.token, callback.id, "请回复新的图标名称").catch(() => {});
+    await editTelegramSubmission(settings.token, callback.message, "⏳ 等待新名称：请直接回复新的图标名称").catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, "请直接回复新的图标名称（例如 OkEmby02）。10 分钟内有效，发送 /cancel 可取消本次改名。").catch(() => {});
+    return;
+  }
+
   let name = "";
   if (action === "rename") {
+    await env.EMBY_ICONS.delete(renameStateKey(chatId)).catch(() => {});
     name = await readSuggestedName(env, id, Number(match[3] || 0));
     if (!name) {
       await answerCallback(settings.token, callback.id, "改名建议已失效，请重新点击“通过并发布”").catch(() => {});
@@ -458,6 +477,7 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   const body = await response.json().catch(() => ({}));
   if (response.ok) {
     await env.EMBY_ICONS.delete(conflictStateKey(id)).catch(() => {});
+    await env.EMBY_ICONS.delete(renameStateKey(chatId)).catch(() => {});
     const label = action === "replace"
       ? "♻️ 已替换现有图标并发布"
       : action === "rename"
@@ -483,11 +503,80 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   await sendTelegramMessage(settings.token, settings.chatId, `审核失败：${body.error || "无法处理该提交"}`).catch(() => {});
 }
 
+async function handleRenameMessage(env, settings, chatId, text) {
+  const key = renameStateKey(chatId);
+  const raw = await env.EMBY_ICONS.get(key);
+  if (!raw) return false;
+  if (text.toLowerCase() === "/cancel") {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    let pending = null;
+    try { pending = JSON.parse(raw); } catch { pending = null; }
+    await restorePendingSubmission(settings, pending, "↩️ 已取消改名操作，可重新审核。");
+    await sendTelegramMessage(settings.token, settings.chatId, "已取消本次改名操作，审核按钮已恢复。");
+    return true;
+  }
+  if (text.startsWith("/")) {
+    await sendTelegramMessage(settings.token, settings.chatId, "请直接回复新的图标名称，或发送 /cancel 取消本次改名。");
+    return true;
+  }
+  await applyManualRename(env, settings, chatId, key, raw, text);
+  return true;
+}
+
+async function applyManualRename(env, settings, chatId, key, raw, text) {
+  let pending;
+  try {
+    pending = JSON.parse(raw);
+  } catch {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, "改名操作已失效，请重新点击审核消息中的按钮。");
+    return;
+  }
+  if (Date.now() - Number(pending.createdAt || 0) > 10 * 60 * 1000) {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    await restorePendingSubmission(settings, pending, "⏱️ 改名操作已超时，可重新审核。");
+    await sendTelegramMessage(settings.token, settings.chatId, "改名操作已超时，请重新点击审核消息中的按钮。");
+    return;
+  }
+  const name = text.trim();
+  if (!name || name.length > 120) {
+    await sendTelegramMessage(settings.token, settings.chatId, "图标名称需为 1-120 个字符，请重新回复。");
+    return;
+  }
+  const response = await executeAdminDecision(new Request("https://telegram-webhook.invalid"), env, pending.id, "approve-rename", "", name);
+  const body = await response.json().catch(() => ({}));
+  if (response.ok) {
+    await env.EMBY_ICONS.delete(key).catch(() => {});
+    await env.EMBY_ICONS.delete(conflictStateKey(pending.id)).catch(() => {});
+    await sendTelegramMessage(settings.token, settings.chatId, `✅ 已改名为「${name}」并通过\n编号：${pending.id}`);
+    if (pending.messageId) {
+      await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, `✅ 已改名为「${name}」并通过`).catch(() => {});
+    }
+    return;
+  }
+  if (body.code === "ICON_NAME_CONFLICT") {
+    const notice = conflictNotice(name, body);
+    await env.EMBY_ICONS.put(conflictStateKey(pending.id), JSON.stringify({
+      id: pending.id,
+      name,
+      suggestions: notice.suggestions,
+      createdAt: Date.now(),
+    }));
+    await sendTelegramMessage(settings.token, settings.chatId, `${notice.text}\n可直接回复新的图标名称重试，或发送 /cancel 取消。`);
+    if (pending.messageId) {
+      await editTelegramSubmission(settings.token, { chat: { id: settings.chatId }, message_id: pending.messageId, text: pending.messageText || "Emby 图标提交" }, notice.text, conflictKeyboard(pending.id, notice.suggestions)).catch(() => {});
+    }
+    return;
+  }
+  await sendTelegramMessage(settings.token, settings.chatId, `改名失败：${body.error || "无法处理该提交"}`);
+}
+
 async function handleMessageUpdate(env, settings, message) {
   const chatId = String(message?.chat?.id || "");
   if (!chatId || chatId !== settings.chatId) return;
   const text = String(message.text || "").trim();
   if (!text) return;
+  if (await handleRenameMessage(env, settings, chatId, text)) return;
   const key = rejectStateKey(chatId);
   const pendingRaw = await env.EMBY_ICONS.get(key);
   if (text.toLowerCase() === "/cancel") {

@@ -20,6 +20,14 @@
       .standalone-links a { text-decoration: none; }
       .credential-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
       .credential-note { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; }
+      .name-hint { display: block; align-self: start; margin-top: -8px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+      .name-hint[hidden] { display: none; }
+      .name-hint.ok { color: var(--accent-strong); }
+      .name-hint.conflict { padding: 10px 12px; border: 1px solid rgb(255 113 140 / 42%); border-radius: 8px; background: rgb(255 113 140 / 10%); color: var(--danger); }
+      .name-hint-label { display: block; margin-top: 4px; }
+      .name-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+      .name-suggestion { padding: 4px 12px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+      .name-suggestion:hover { background: rgb(255 255 255 / 10%); }
       .turnstile-box { min-height: 65px; }
       @media (max-width: 680px) { .standalone { width: calc(100% - 28px); padding: 32px 0 48px; } .standalone-card { padding: 22px 18px; } .standalone-form { gap: 14px; } .standalone-form .button { width: 100%; min-height: 44px; } .standalone-links { display: grid; grid-template-columns: 1fr; } .standalone-links .button { width: 100%; } }
       @media (max-width: 360px) { .standalone { width: calc(100% - 20px); } .standalone-card { padding-inline: 15px; } }
@@ -45,6 +53,7 @@
         <p>提交内容会进入审核队列。审核通过后才会出现在公开图标库中。请使用图标的 HTTPS 直链。</p>
         <form class="standalone-form" id="submission-form">
           <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" required autocomplete="off" /></label>
+          <span class="name-hint" id="name-hint" hidden></span>
           <label class="field"><span>图标 URL</span><input id="url" name="url" type="url" maxlength="2048" placeholder="https://example.com/icon.png" required autocomplete="url" /></label>
           <label class="field"><span>补充说明（可选）</span><textarea id="note" name="note" maxlength="1000"></textarea></label>
           <div class="turnstile-box" id="turnstile-container"></div>
@@ -58,6 +67,6 @@
       // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submit.js?v=20261007-ui20"></script>
+    <script type="module" src="/submit.js?v=20261007-ui21"></script>
   </body>
 </html>

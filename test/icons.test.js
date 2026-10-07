@@ -5,11 +5,13 @@ import {
   findDuplicateIcon,
   findIconNameConflict,
   handleGet,
+  handleNameCheck,
   handlePut,
   normalizeIconName,
   suggestIconNames,
 } from "../functions/_shared/icons.js";
 import { createAdminSession } from "../functions/_shared/admin.js";
+import { createEnvironment as createSubmissionEnvironment } from "./helpers.js";
 
 const seed = {
   name: "Emby Icons",
@@ -238,4 +240,24 @@ test("PUT rejects documents with duplicate normalized icon names", async () => {
   assert.equal(body.code, "ICON_NAME_CONFLICT");
   assert.equal(body.conflict.name, "OkEmby");
   assert.equal(body.conflict.index, 0);
+});
+
+test("public name check reports conflicts with suggestions", async () => {
+  const env = createSubmissionEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+
+  const conflict = await handleNameCheck(new Request("https://example.com/api/name-check?name=OkEmby"), env);
+  assert.equal(conflict.status, 200);
+  const conflicting = await conflict.json();
+  assert.equal(conflicting.exists, true);
+  assert.equal(conflicting.conflict.name, "OkEmby");
+  assert.deepEqual(conflicting.suggestions, ["OkEmby02", "OkEmby03"]);
+
+  const free = await handleNameCheck(new Request("https://example.com/api/name-check?name=OkEmby02"), env);
+  const freeBody = await free.json();
+  assert.equal(freeBody.exists, false);
+  assert.deepEqual(freeBody.suggestions, []);
+
+  const blank = await handleNameCheck(new Request("https://example.com/api/name-check?name=%20"), env);
+  const blankBody = await blank.json();
+  assert.equal(blankBody.exists, false);
 });

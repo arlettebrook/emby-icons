@@ -274,6 +274,31 @@ export async function handlePut(request, env) {
   );
 }
 
+export async function handleNameCheck(request, env) {
+  const name = String(new URL(request.url).searchParams.get("name") || "").trim().slice(0, 200);
+  const headers = { "Cache-Control": "no-store" };
+  const empty = { name, exists: false, conflict: null, suggestions: [] };
+  if (!name) return jsonResponse(empty, { headers });
+  try {
+    const { text } = await readDocument(env);
+    if (text === null) return jsonResponse(empty, { headers });
+    const document = JSON.parse(text);
+    const list = Array.isArray(document?.icons) ? document.icons : [];
+    const conflict = findIconNameConflict(list, name);
+    return jsonResponse(
+      {
+        name,
+        exists: Boolean(conflict),
+        conflict: conflict ? { name: conflict.name, url: conflict.url } : null,
+        suggestions: conflict ? suggestIconNames(name, list, 2) : [],
+      },
+      { headers },
+    );
+  } catch (error) {
+    return jsonResponse({ error: error.message || "Name check failed" }, { status: 500, headers });
+  }
+}
+
 export function handleOptions() {
   return new Response(null, { status: 204, headers: corsHeaders });
 }

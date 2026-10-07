@@ -66,6 +66,16 @@ function webhookRequest(secret, update) {
   });
 }
 
+function message(secret, env, text, messageId = 11) {
+  return handleTelegramWebhook(
+    webhookRequest(secret, {
+      message: { chat: { id: CHAT_ID }, message_id: messageId, text },
+    }),
+    env,
+    secret,
+  );
+}
+
 function callback(secret, env, data, callbackId = "cb-1") {
   return handleTelegramWebhook(
     webhookRequest(secret, {
@@ -145,6 +155,74 @@ test("renaming via Telegram publishes under the suggested name", async () => {
     assert.equal(env.DB.submissions.get(id).name, "OkEmby02");
     const answer = mock.method("answerCallbackQuery").at(-1);
     assert.match(answer.payload.text, /OkEmby02/);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("manual rename via Telegram publishes under the typed name", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
+    const buttons = mock.method("sendMessage").at(-1).payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    assert.ok(buttons.includes(`rename-manual:${id}`), "expected a manual rename button");
+
+    await callback(secret, env, `rename-manual:${id}`);
+    assert.ok(env.__kv.has(`settings/telegram/rename/${CHAT_ID}`));
+
+    await message(secret, env, "OkEmbyCustom");
+    const icons = readKv(env).icons;
+    assert.deepEqual(icons.map((icon) => icon.name), ["OkEmby", "OkEmbyCustom"]);
+    assert.equal(env.DB.submissions.get(id).status, "approved");
+    assert.equal(env.DB.submissions.get(id).name, "OkEmbyCustom");
+    assert.ok(!env.__kv.has(`settings/telegram/rename/${CHAT_ID}`), "rename state should be cleared");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("manual rename that still conflicts stays open and redraws the buttons", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await callback(secret, env, `rename-manual:${id}`);
+    await message(secret, env, "OkEmby");
+
+    assert.equal(env.DB.submissions.get(id).status, "pending");
+    assert.ok(env.__kv.has(`settings/telegram/rename/${CHAT_ID}`), "rename flow should stay open");
+    const edit = mock.method("editMessageText").at(-1);
+    assert.match(edit.payload.text, /名称冲突/);
+    const buttons = edit.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    assert.ok(buttons.includes(`rename-manual:${id}`));
+    assert.ok(buttons.includes(`replace:${id}`));
+  } finally {
+    mock.restore();
+  }
+});
+
+test("cancelling a manual rename restores the review buttons", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+    const secret = await configureTelegram(env);
+    const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
+
+    await callback(secret, env, `rename-manual:${id}`);
+    await message(secret, env, "/cancel");
+
+    assert.ok(!env.__kv.has(`settings/telegram/rename/${CHAT_ID}`));
+    assert.equal(env.DB.submissions.get(id).status, "pending");
+    const edit = mock.method("editMessageText").at(-1);
+    assert.match(edit.payload.text, /取消改名/);
+    const buttons = edit.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    assert.ok(buttons.includes(`approve:${id}`));
   } finally {
     mock.restore();
   }
