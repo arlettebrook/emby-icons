@@ -2669,6 +2669,14 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   display: none;
 }
 
+.icon-validity-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .icon-validity-note.is-success {
   color: #047857;
 }
@@ -2805,6 +2813,11 @@ body.has-unsaved-changes #save-button:not(:disabled) {
   .icon-validity-actions .button,
   .icon-validity-toolbar .button {
     flex: 1;
+  }
+
+  .icon-validity-toolbar-actions {
+    width: 100%;
+    flex-direction: column;
   }
 
   .icon-validity-item {

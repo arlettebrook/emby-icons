@@ -3,6 +3,7 @@ const dialog = document.querySelector("#icon-validity-dialog");
 const closeButton = document.querySelector("#icon-validity-close");
 const rescanButton = document.querySelector("#icon-validity-rescan");
 const deleteAllButton = document.querySelector("#icon-validity-delete-all");
+const rescanInvalidButton = document.querySelector("#icon-validity-rescan-invalid");
 const retrySaveButton = document.querySelector("#icon-validity-retry-save");
 const summary = document.querySelector("#icon-validity-summary");
 const note = document.querySelector("#icon-validity-note");
@@ -28,6 +29,7 @@ function setScanControls(scanning) {
   rescanButton.disabled = busy;
   openButton.disabled = busy;
   deleteAllButton.disabled = busy || invalidEntries.length === 0;
+  rescanInvalidButton.disabled = busy || invalidEntries.length === 0;
   retrySaveButton.disabled = busy;
   list.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
 }
@@ -80,11 +82,17 @@ async function inspectIcon(icon, signal, cache) {
   return cache.get(url);
 }
 
-function updateDeleteAllLabel() {
-  deleteAllButton.textContent = invalidEntries.length
+function updateActionLabels() {
+  const busy = Boolean(activeScan) || removalSaving;
+  const hasInvalid = invalidEntries.length > 0;
+  deleteAllButton.textContent = hasInvalid
     ? `一键删除无效图标（${invalidEntries.length}）`
     : "一键删除无效图标";
-  deleteAllButton.disabled = Boolean(activeScan) || removalSaving || invalidEntries.length === 0;
+  deleteAllButton.disabled = busy || !hasInvalid;
+  rescanInvalidButton.textContent = hasInvalid
+    ? `重新检测无效图标（${invalidEntries.length}）`
+    : "重新检测无效图标";
+  rescanInvalidButton.disabled = busy || !hasInvalid;
 }
 
 function createInvalidEntryArticle(entry) {
@@ -146,7 +154,7 @@ function renderInvalidEntries() {
   const fragment = document.createDocumentFragment();
   invalidEntries.forEach((entry) => fragment.append(createInvalidEntryArticle(entry)));
   list.append(fragment);
-  updateDeleteAllLabel();
+  updateActionLabels();
 }
 
 function appendInvalidEntries(entries) {
@@ -155,7 +163,7 @@ function appendInvalidEntries(entries) {
   entries.forEach((entry) => fragment.append(createInvalidEntryArticle(entry)));
   list.append(fragment);
   empty.hidden = invalidEntries.length !== 0;
-  updateDeleteAllLabel();
+  updateActionLabels();
 }
 
 async function applyRemoval(entries) {
@@ -270,7 +278,7 @@ async function runScan() {
     activeScan = null;
     renderInvalidEntries();
     setScanControls(false);
-    updateDeleteAllLabel();
+    updateActionLabels();
     return;
   }
 
@@ -328,6 +336,73 @@ async function runScan() {
   }
 }
 
+async function rescanInvalid() {
+  if (activeScan) activeScan.controller.abort();
+  const targets = [...invalidEntries];
+  if (!targets.length) return;
+  const run = { id: ++scanSequence, controller: new AbortController() };
+  activeScan = run;
+  pendingResultEntries = [];
+  if (resultRenderFrame) {
+    window.cancelAnimationFrame(resultRenderFrame);
+    resultRenderFrame = 0;
+  }
+  note.textContent = "正在重新检测列出的无效图标地址…";
+  note.className = "icon-validity-note";
+  setScanControls(true);
+
+  let completed = 0;
+  let nextIndex = 0;
+  let stillInvalid = 0;
+  let recovered = 0;
+  let lastProgressAt = 0;
+  const cache = new Map();
+  const results = [];
+  setSummary(`正在重新检测无效图标 0 / ${targets.length}…`, "running");
+
+  async function worker() {
+    while (!run.controller.signal.aborted) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= targets.length) return;
+      const entry = targets[index];
+      const result = await inspectIcon(entry.icon, run.controller.signal, cache);
+      if (result.cancelled || run.id !== scanSequence) return;
+      if (result.valid) {
+        recovered += 1;
+      } else {
+        stillInvalid += 1;
+        results.push({ icon: entry.icon, index: entry.index, reason: result.reason });
+      }
+      completed += 1;
+      const now = Date.now();
+      if (completed === targets.length || now - lastProgressAt >= 100) {
+        lastProgressAt = now;
+        setSummary(`正在重新检测无效图标 ${completed} / ${targets.length}（仍无效 ${stillInvalid}，已恢复 ${recovered}）…`, "running");
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, targets.length) }, worker));
+  if (run.id !== scanSequence || run.controller.signal.aborted) return;
+  results.sort((left, right) => left.index - right.index);
+  invalidEntries = results;
+  activeScan = null;
+  renderInvalidEntries();
+  setScanControls(false);
+  if (invalidEntries.length) {
+    setSummary(`重新检测完成：${stillInvalid} 个仍无效${recovered ? `，${recovered} 个已恢复有效` : ""}。`, "error");
+    note.textContent = recovered
+      ? `已移除 ${recovered} 个恢复正常的地址，其余仍无法加载。`
+      : "只会列出无法作为图片或网站图标加载的地址。";
+    note.className = "icon-validity-note";
+  } else {
+    setSummary(`重新检测完成：列出的 ${targets.length} 个图标均已恢复有效。`, "success");
+    note.textContent = "之前检测到的无效地址现已全部可以正常加载。";
+    note.className = "icon-validity-note is-success";
+  }
+}
+
 function openDialog() {
   dialog.showModal();
   if (!window.embyIconsAdmin?.isReady?.()) {
@@ -351,6 +426,9 @@ openButton?.addEventListener("click", openDialog);
 closeButton?.addEventListener("click", closeDialog);
 rescanButton?.addEventListener("click", () => {
   runScan().catch(handleScanError);
+});
+rescanInvalidButton?.addEventListener("click", () => {
+  rescanInvalid().catch(handleScanError);
 });
 deleteAllButton?.addEventListener("click", async () => {
   if (!invalidEntries.length) return;

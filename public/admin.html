@@ -226,8 +226,11 @@
           <div class="icon-validity-summary" id="icon-validity-summary" role="status" aria-live="polite"></div>
           <div class="icon-validity-toolbar">
             <p id="icon-validity-note">删除后会自动保存到云端仓库。</p>
-            <button class="button button-secondary" id="icon-validity-retry-save" type="button" hidden>重试保存</button>
-            <button class="button button-danger" id="icon-validity-delete-all" type="button" disabled>一键删除无效图标</button>
+            <div class="icon-validity-toolbar-actions">
+              <button class="button button-secondary" id="icon-validity-retry-save" type="button" hidden>重试保存</button>
+              <button class="button button-secondary" id="icon-validity-rescan-invalid" type="button" disabled>重新检测无效图标</button>
+              <button class="button button-danger" id="icon-validity-delete-all" type="button" disabled>一键删除无效图标</button>
+            </div>
           </div>
           <div class="icon-validity-list" id="icon-validity-list"></div>
           <div class="icon-validity-empty" id="icon-validity-empty" hidden>
@@ -390,6 +393,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
-    <script type="module" src="/admin-entry.js?v=20261007-ui22"></script>
+    <script type="module" src="/admin-entry.js?v=20261008-ui23"></script>
   </body>
 </html>
