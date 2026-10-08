@@ -34,6 +34,12 @@ function setScanControls(scanning) {
   list.querySelectorAll("button").forEach((button) => { button.disabled = busy; });
 }
 
+function abortEntryChecks() {
+  invalidEntries.forEach((entry) => {
+    if (entry.checking && entry.controller) entry.controller.abort();
+  });
+}
+
 function getUrlError(value) {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -134,13 +140,20 @@ function createInvalidEntryArticle(entry) {
     openLink.textContent = "地址无效";
   }
 
+  const recheckAction = document.createElement("button");
+  recheckAction.className = "button button-secondary";
+  recheckAction.type = "button";
+  recheckAction.textContent = entry.checking ? "检测中…" : "重新检测";
+  recheckAction.disabled = Boolean(entry.checking) || Boolean(activeScan) || removalSaving;
+  recheckAction.addEventListener("click", () => recheckEntry(entry));
+
   const action = document.createElement("button");
   action.className = "button button-danger";
   action.type = "button";
   action.disabled = Boolean(activeScan) || removalSaving;
   action.textContent = "删除";
   action.addEventListener("click", () => removeEntry(entry));
-  actions.append(openLink, action);
+  actions.append(openLink, recheckAction, action);
 
   article.append(image, content, actions);
   return article;
@@ -208,6 +221,49 @@ async function removeEntry(entry) {
   }
 }
 
+async function recheckEntry(entry) {
+  if (entry.checking || activeScan || removalSaving) return;
+  entry.checking = true;
+  const controller = new AbortController();
+  entry.controller = controller;
+  renderInvalidEntries();
+  const label = entry.icon.name || `第 ${entry.index + 1} 项`;
+  note.textContent = `正在重新检测「${label}」…`;
+  note.className = "icon-validity-note";
+
+  let outcome = null;
+  try {
+    const result = await inspectIcon(entry.icon, controller.signal, new Map());
+    if (result.cancelled) {
+      outcome = { type: "cancelled" };
+    } else if (result.valid) {
+      invalidEntries = invalidEntries.filter((item) => item !== entry);
+      outcome = { type: "recovered" };
+    } else {
+      entry.reason = result.reason;
+      outcome = { type: "invalid", reason: result.reason };
+    }
+  } catch (error) {
+    outcome = { type: "error", message: error?.message || "检测失败，请重试。" };
+  } finally {
+    entry.checking = false;
+    entry.controller = null;
+    renderInvalidEntries();
+    note.textContent = "只会列出无法作为图片或网站图标加载的地址。";
+    note.className = "icon-validity-note";
+  }
+
+  if (!outcome || outcome.type === "cancelled") return;
+  if (outcome.type === "recovered") {
+    setSummary(`「${label}」已恢复正常加载，并已从无效列表移除。`, "success");
+  } else if (outcome.type === "invalid") {
+    if (!invalidEntries.includes(entry)) return;
+    setSummary(`「${label}」仍然无效：${outcome.reason}`, "error");
+  } else {
+    setSummary(outcome.message, "error");
+  }
+}
+
 function handleScanError(error) {
   if (activeScan) activeScan.controller.abort();
   activeScan = null;
@@ -258,6 +314,7 @@ async function retrySave() {
 
 async function runScan() {
   if (activeScan) activeScan.controller.abort();
+  abortEntryChecks();
   const run = { id: ++scanSequence, controller: new AbortController() };
   activeScan = run;
   invalidEntries = [];
@@ -416,6 +473,7 @@ function openDialog() {
 
 function closeDialog() {
   if (activeScan) activeScan.controller.abort();
+  abortEntryChecks();
   scanSequence += 1;
   activeScan = null;
   if (dialog.open) dialog.close();

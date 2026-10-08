@@ -21,7 +21,7 @@ async function loadAdminApp() {
   await import("/admin-review.js?v=20261007-ui22");
   await import("/admin-proxy.js?v=20260729-ui1");
   await import("/app.js?v=20261004-ui19");
-  await import("/admin-validity.js?v=20261008-ui23");
+  await import("/admin-validity.js?v=20261008-ui24");
 }
 
 async function hasSession() {
