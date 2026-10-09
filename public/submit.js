@@ -5,6 +5,7 @@ const nameInput = document.querySelector("#name");
 const nameHint = document.querySelector("#name-hint");
 const nameExample = document.querySelector("#name-example");
 let turnstileToken = "";
+let turnstileWidgetId = null;
 
 function showResult(message, error = false) {
   result.hidden = false;
@@ -52,14 +53,30 @@ function loadTurnstile() {
   script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
   script.async = true;
   script.onload = () => {
-    window.turnstile?.render("#turnstile-container", {
+    if (!window.turnstile) return;
+    turnstileWidgetId = window.turnstile.render("#turnstile-container", {
       sitekey: siteKey,
+      // 令牌 300 秒后过期，允许控件在过期时自动重新签发。
+      "refresh-expired": "auto",
       callback: (token) => { turnstileToken = token; },
       "expired-callback": () => { turnstileToken = ""; },
       "error-callback": () => { turnstileToken = ""; },
     });
   };
   document.head.append(script);
+}
+
+// Turnstile 的令牌是一次性的：每次提交（无论成功还是失败）后都必须重置控件，
+// 否则控件会停在旧结果上、不再签发新令牌，导致再次提交时验证失效。
+function resetTurnstile() {
+  turnstileToken = "";
+  try {
+    if (window.turnstile && turnstileWidgetId !== null && turnstileWidgetId !== undefined) {
+      window.turnstile.reset(turnstileWidgetId);
+    }
+  } catch {
+    // 忽略：下一次提交时再要求访客重新完成验证即可。
+  }
 }
 
 let nameCheckTimer = null;
@@ -135,6 +152,25 @@ function renderNameConflict(body, value) {
   showNameHint("conflict", ...nodes);
 }
 
+// 队列中已有同名提交：属于提醒而非阻断，允许继续提交但建议改名。
+function renderQueueWarning(body, value) {
+  const suggestions = Array.isArray(body.suggestions)
+    ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
+    : [];
+  nameCheckState = { value, exists: false, suggestions };
+  setNameBlocked(false);
+  const message = document.createElement("span");
+  message.textContent = "待审核队列中已有一条同名提交，通过审核时可能被视为重复，建议改名。";
+  const nodes = [message];
+  if (suggestions.length) {
+    const label = document.createElement("span");
+    label.className = "name-hint-label";
+    label.textContent = "建议改名（点击填入）：";
+    nodes.push(label, makeSuggestionChips(suggestions));
+  }
+  showNameHint("warn", ...nodes);
+}
+
 function currentNameConflicts() {
   const value = nameInput.value.trim();
   return Boolean(value) && nameCheckState.exists && nameCheckState.value === value;
@@ -159,6 +195,8 @@ async function runNameCheck(value) {
     if (!response.ok) return;
     if (body.exists) {
       renderNameConflict(body, value);
+    } else if (body.queueDuplicate) {
+      renderQueueWarning(body, value);
     } else {
       nameCheckState = { value, exists: false, suggestions: [] };
       setNameBlocked(false);
@@ -237,6 +275,10 @@ form.addEventListener("submit", async (event) => {
         showResult("该名称已存在，不能提交，请换一个名字。", true);
         return;
       }
+      if (/turnstile/i.test(String(body.error || ""))) {
+        showResult("Cloudflare 人机验证已失效，已自动刷新验证，请重新完成后再提交。", true);
+        return;
+      }
       throw new Error(body.error || `提交失败（${response.status}）`);
     }
     localStorage.setItem(`emby-submission-token:${body.submission.id}`, body.accessToken);
@@ -252,13 +294,13 @@ form.addEventListener("submit", async (event) => {
     localStorage.setItem("emby-submissions", JSON.stringify(savedSubmissions.slice(0, 30)));
     form.reset();
     clearNameHint();
-    turnstileToken = "";
     showSubmissionSuccess(body.submission, body.accessToken);
   } catch (error) {
     showResult(error.message, true);
   } finally {
     submitInFlight = false;
     setNameBlocked(currentNameConflicts());
+    resetTurnstile();
   }
 });
 

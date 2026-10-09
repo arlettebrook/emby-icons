@@ -11,7 +11,7 @@ import {
   suggestIconNames,
 } from "../functions/_shared/icons.js";
 import { createAdminSession } from "../functions/_shared/admin.js";
-import { createEnvironment as createSubmissionEnvironment } from "./helpers.js";
+import { createEnvironment as createSubmissionEnvironment, createSubmission } from "./helpers.js";
 
 const seed = {
   name: "Emby Icons",
@@ -260,4 +260,27 @@ test("public name check reports conflicts with suggestions", async () => {
   const blank = await handleNameCheck(new Request("https://example.com/api/name-check?name=%20"), env);
   const blankBody = await blank.json();
   assert.equal(blankBody.exists, false);
+});
+
+test("public name check flags names already waiting in the review queue", async () => {
+  const env = createSubmissionEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
+  await createSubmission(env, "Wait", "https://example.com/wait.png");
+
+  const dup = await handleNameCheck(new Request("https://example.com/api/name-check?name=%20Wait%20"), env);
+  assert.equal(dup.status, 200);
+  const dupBody = await dup.json();
+  assert.equal(dupBody.exists, false);
+  assert.equal(dupBody.queueDuplicate, true);
+  assert.equal(dupBody.queue.name, "Wait");
+  assert.deepEqual(dupBody.suggestions, ["Wait01", "Wait02"]);
+
+  const free = await handleNameCheck(new Request("https://example.com/api/name-check?name=Wait01"), env);
+  const freeBody = await free.json();
+  assert.equal(freeBody.queueDuplicate, false);
+  assert.deepEqual(freeBody.suggestions, []);
+
+  const published = await handleNameCheck(new Request("https://example.com/api/name-check?name=OkEmby"), env);
+  const publishedBody = await published.json();
+  assert.equal(publishedBody.exists, true);
+  assert.equal(publishedBody.queueDuplicate, false);
 });

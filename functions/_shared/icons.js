@@ -274,23 +274,42 @@ export async function handlePut(request, env) {
   );
 }
 
+async function findPendingNameMatch(env, name) {
+  const key = normalizeIconName(name);
+  if (!key || !env?.DB) return null;
+  try {
+    const result = await env.DB.prepare(
+      "SELECT id, name, url FROM submissions WHERE status = 'pending' ORDER BY created_at ASC LIMIT 500",
+    ).all();
+    const rows = Array.isArray(result?.results) ? result.results : [];
+    return rows.find((row) => row && normalizeIconName(row.name) === key) || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleNameCheck(request, env) {
   const name = String(new URL(request.url).searchParams.get("name") || "").trim().slice(0, 200);
   const headers = { "Cache-Control": "no-store" };
-  const empty = { name, exists: false, conflict: null, suggestions: [] };
+  const empty = { name, exists: false, conflict: null, suggestions: [], queueDuplicate: false, queue: null };
   if (!name) return jsonResponse(empty, { headers });
   try {
     const { text } = await readDocument(env);
-    if (text === null) return jsonResponse(empty, { headers });
-    const document = JSON.parse(text);
+    const document = text === null ? { icons: [] } : JSON.parse(text);
     const list = Array.isArray(document?.icons) ? document.icons : [];
     const conflict = findIconNameConflict(list, name);
+    // A name that is not published yet can still collide with a waiting
+    // submission, so flag that as an advisory while allowing the submit.
+    const pending = conflict ? null : await findPendingNameMatch(env, name);
+    const taken = pending ? [...list, pending] : list;
     return jsonResponse(
       {
         name,
         exists: Boolean(conflict),
         conflict: conflict ? { name: conflict.name, url: conflict.url } : null,
-        suggestions: conflict ? suggestIconNames(name, list, 2) : [],
+        suggestions: conflict || pending ? suggestIconNames(name, taken, 2) : [],
+        queueDuplicate: Boolean(pending),
+        queue: pending ? { name: pending.name } : null,
       },
       { headers },
     );
