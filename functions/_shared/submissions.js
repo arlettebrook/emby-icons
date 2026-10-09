@@ -204,13 +204,22 @@ async function resetToPending(env, id) {
   }
 }
 
-async function finalizeApproval(env, id, reviewerId, name) {
+async function finalizeApproval(env, id, reviewerId, name, fields = {}) {
+  // COALESCE keeps the stored url/note unless an edit explicitly overrides them.
   const updated = await env.DB
     .prepare(
-      "UPDATE submissions SET status = 'approved', name = ?1, reviewer_id = ?2, reviewed_at = ?3 WHERE id = ?4 AND status IN ('approving', 'pending')",
+      "UPDATE submissions SET status = 'approved', name = ?1, url = COALESCE(?2, url), note = COALESCE(?3, note), reviewer_id = ?4, reviewed_at = ?5 WHERE id = ?6 AND status IN ('approving', 'pending')",
     )
-    .bind(name, reviewerId, Date.now(), id)
+    .bind(
+      name,
+      fields.url === undefined ? null : fields.url,
+      fields.note === undefined ? null : fields.note,
+      reviewerId,
+      Date.now(),
+      id,
+    )
     .run();
+
   if (updated.meta?.changes) return true;
   const latest = await readSubmission(env, id);
   if (latest?.status === "approved") return true;
@@ -379,8 +388,8 @@ export async function handleAdminSubmissionDecision(request, env, id) {
   }
 
   const action = body.action;
-  if (!["approve", "approve-rename", "replace", "reject"].includes(action)) {
-    return jsonResponse(request, env, { error: "action must be approve, approve-rename, replace or reject" }, { status: 400 });
+  if (!["approve", "approve-rename", "replace", "edit", "reject"].includes(action)) {
+    return jsonResponse(request, env, { error: "action must be approve, approve-rename, replace, edit or reject" }, { status: 400 });
   }
 
   const reviewerId = "admin";
@@ -406,11 +415,36 @@ export async function handleAdminSubmissionDecision(request, env, id) {
   }
 
   let effectiveName = row.name;
-  if (action === "approve-rename") {
+  if (action === "approve-rename" || action === "edit") {
     const nameResult = trimString(body.name, "name", MAX_NAME_LENGTH);
     if (typeof nameResult !== "string") return jsonResponse(request, env, { error: nameResult }, { status: 400 });
     effectiveName = nameResult;
   }
+
+  // "edit" lets a reviewer fix the name, image URL and description in one pass
+  // before publishing. The description is kept separate from the review note.
+  let effectiveUrl = row.url;
+  let effectiveNote;
+  if (action === "edit") {
+    const urlResult = trimString(body.url, "url", MAX_URL_LENGTH);
+    if (typeof urlResult !== "string") return jsonResponse(request, env, { error: urlResult }, { status: 400 });
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(urlResult);
+    } catch {
+      return jsonResponse(request, env, { error: "url must be a valid URL" }, { status: 400 });
+    }
+    if (parsedUrl.protocol !== "https:") return jsonResponse(request, env, { error: "url must use HTTPS" }, { status: 400 });
+    if (parsedUrl.username || parsedUrl.password) return jsonResponse(request, env, { error: "url must not contain credentials" }, { status: 400 });
+    effectiveUrl = parsedUrl.href;
+    if (body.description !== undefined) {
+      const description = trimString(body.description, "description", MAX_NOTE_LENGTH, false);
+      if (typeof description !== "string") return jsonResponse(request, env, { error: description }, { status: 400 });
+      effectiveNote = description;
+    }
+  }
+
+  const editFields = action === "edit" ? { url: effectiveUrl, note: effectiveNote } : {};
 
   if (row.status === "pending") {
     const claimed = await env.DB.prepare("UPDATE submissions SET status = 'approving' WHERE id = ?1 AND status = 'pending'").bind(id).run();
@@ -446,8 +480,8 @@ export async function handleAdminSubmissionDecision(request, env, id) {
 
     // Idempotent retry: a previous attempt may have written KV but failed before
     // updating D1. Matching name + URL means the submission is already published.
-    if (conflict && conflict.url === row.url) {
-      await finalizeApproval(env, id, reviewerId, conflict.name);
+    if (conflict && conflict.url === effectiveUrl) {
+      await finalizeApproval(env, id, reviewerId, conflict.name, editFields);
       await writeAuditLog(env, {
         actorId: reviewerId,
         action: "submission-approved",
@@ -470,11 +504,11 @@ export async function handleAdminSubmissionDecision(request, env, id) {
     if (conflict) {
       const key = normalizeIconName(effectiveName);
       const replaced = document.icons.map((icon, index) =>
-        index === conflict.index ? { ...icon, name: effectiveName, url: row.url } : icon,
+        index === conflict.index ? { ...icon, name: effectiveName, url: effectiveUrl } : icon,
       );
       document.icons = replaced.filter((icon, index) => index === conflict.index || normalizeIconName(icon?.name) !== key);
     } else {
-      document.icons.push({ name: effectiveName, url: row.url });
+      document.icons.push({ name: effectiveName, url: effectiveUrl });
     }
 
     const serialized = `${JSON.stringify(document, null, 2)}\n`;
@@ -484,14 +518,14 @@ export async function handleAdminSubmissionDecision(request, env, id) {
     published = true;
     publishedCount = document.icons.length;
 
-    await finalizeApproval(env, id, reviewerId, effectiveName);
+    await finalizeApproval(env, id, reviewerId, effectiveName, editFields);
     await writeAuditLog(env, {
       actorId: reviewerId,
       action: "submission-approved",
       targetId: id,
       details: {
         name: effectiveName,
-        url: row.url,
+        url: effectiveUrl,
         etag: serializedEtag,
         ...(conflict ? { replaced: { name: conflict.name, url: conflict.url } } : {}),
       },
@@ -510,12 +544,12 @@ export async function handleAdminSubmissionDecision(request, env, id) {
     // KV already contains the icon. Reconcile D1 instead of returning the
     // submission to "pending" (which is what caused the duplicate-name loop).
     try {
-      await finalizeApproval(env, id, reviewerId, effectiveName);
+      await finalizeApproval(env, id, reviewerId, effectiveName, editFields);
       await writeAuditLog(env, {
         actorId: reviewerId,
         action: "submission-approved",
         targetId: id,
-        details: { name: effectiveName, url: row.url, recovered: true },
+        details: { name: effectiveName, url: effectiveUrl, recovered: true },
       });
       return jsonResponse(request, env, { ok: true, status: "approved", count: publishedCount, recovered: true });
     } catch (recoveryError) {

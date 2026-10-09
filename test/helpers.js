@@ -38,7 +38,8 @@ class FakeD1 {
         all: async () => {
           if (text.includes("FROM submissions")) {
             const scoped = text.includes("WHERE status = ?1");
-            const status = scoped ? values[0] : null;
+            const pendingOnly = text.includes("WHERE status = 'pending'");
+            const status = scoped ? values[0] : pendingOnly ? "pending" : null;
             const limit = scoped ? values[1] : values[0];
             const rows = [...db.submissions.values()]
               .filter((row) => (status ? row.status === status : true))
@@ -118,11 +119,13 @@ class FakeD1 {
               db.approvalUpdateFailures -= 1;
               throw new Error("D1 approval write failed");
             }
-            const [name, reviewerId, reviewedAt, id] = values;
+            const [name, url, note, reviewerId, reviewedAt, id] = values;
             const row = db.submissions.get(id);
             if (row && (row.status === "approving" || row.status === "pending")) {
               row.status = "approved";
               row.name = name;
+              if (url !== null && url !== undefined) row.url = url;
+              if (note !== null && note !== undefined) row.note = note;
               row.reviewer_id = reviewerId;
               row.reviewed_at = reviewedAt;
               return { meta: { changes: 1 } };

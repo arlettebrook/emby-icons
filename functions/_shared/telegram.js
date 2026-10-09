@@ -7,6 +7,11 @@ const MAX_TOKEN_LENGTH = 256;
 const MAX_CHAT_ID_LENGTH = 256;
 const REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
 const REJECT_REASONS = ["图片模糊或质量不佳", "图标重复，无需收录", "图片无法访问"];
+const TEXT_LIMIT = 4096;
+const CAPTION_LIMIT = 1024;
+const QUEUE_LIMIT = 50;
+const QUEUE_PAGE_SIZE = 10;
+const MAX_EDIT_NOTE_LENGTH = 1000;
 
 function responseHeaders(request) {
   return {
@@ -167,6 +172,26 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
   });
 }
 
+// Same as sendTelegramMessage but for card bodies that already contain HTML.
+async function sendHtmlMessage(token, chatId, text, replyMarkup) {
+  return telegramApi(token, "sendMessage", {
+    chat_id: chatId,
+    text: hardTruncate(text, TEXT_LIMIT),
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+}
+
+// Cut already-escaped HTML without splitting a trailing entity or surrogate pair.
+function hardTruncate(value, limit) {
+  const text = String(value || "");
+  if (text.length <= limit) return text;
+  let cut = text.slice(0, Math.max(0, limit - 1)).replace(/&[a-zA-Z#0-9]*$/, "");
+  cut = cut.replace(/[\uD800-\uDBFF]$/, "");
+  return cut + "…";
+}
+
 function truncate(value, limit) {
   const text = String(value || "");
   if (text.length <= limit) return text;
@@ -174,41 +199,67 @@ function truncate(value, limit) {
   return text.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, "") + "…";
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>]/g, (character) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[character]
+  ));
+}
+
+// Escape first, then cut, so HTML entities are never split in half.
+function htmlTruncate(value, limit) {
+  const escaped = escapeHtml(value);
+  if (escaped.length <= limit) return escaped;
+  const cut = escaped.slice(0, Math.max(0, limit - 1)).replace(/&[a-zA-Z#0-9]*$/, "");
+  return `${cut}…`;
+}
+
 // Rebuild cards from submission data instead of appending to callback.message.text.
-// Keep valid URLs intact; budget the optional detail against the message limit.
-function submissionMessage(submission, status = "🕓 待审核", detail = "") {
-  const header = [
-    "🖼 Emby 图标审核",
-    `名称：${truncate(submission.name, 120)}`,
-    `URL：${truncate(submission.url, 2048)}`,
-    `说明：${truncate(submission.note || "无", 500)}`,
-    `编号：${submission.id}`,
+// Cards use Telegram HTML so names and status stand out; every field is escaped
+// before it is truncated so the markup can never be broken by user content.
+function submissionMessage(submission, status = "🕓 待审核", detail = "", limit = TEXT_LIMIT) {
+  const compact = limit <= CAPTION_LIMIT;
+  const name = htmlTruncate(submission.name, 140);
+  const url = htmlTruncate(submission.url, compact ? 140 : 2048);
+  const note = htmlTruncate(submission.note || "无", compact ? 120 : 600);
+  const id = htmlTruncate(submission.id, 40);
+  const statusLine = htmlTruncate(status, compact ? 200 : 800);
+  let text = [
+    "🖼 <b>Emby 图标审核</b>",
+    `名称：<b>${name}</b>`,
+    `URL：<code>${url}</code>`,
+    `说明：${note}`,
+    `编号：<code>${id}</code>`,
+    "",
+    `<b>${statusLine}</b>`,
   ].join("\n");
-  let text = `${header}\n\n${truncate(status, 1200)}`;
-  const remaining = Math.min(800, 4096 - text.length - 2);
-  if (detail && remaining > 0) text += `\n\n${truncate(detail, remaining)}`;
+  const remaining = limit - text.length - 2;
+  if (detail && remaining > 12) text += `\n\n${htmlTruncate(detail, remaining - 1)}`;
   return text;
 }
 
-function submissionKeyboard(id) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "✅ 通过并发布", callback_data: `approve:${id}` },
-        { text: "❌ 拒绝…", callback_data: `reject:${id}` },
-      ],
-      [{ text: "✏️ 改名并通过…", callback_data: `rename-manual:${id}` }],
-    ],
-  };
+function submissionKeyboard(submission) {
+  const rows = [];
+  if (submission?.url) rows.push([{ text: "🖼 打开原图", url: submission.url }]);
+  rows.push([
+    { text: "✅ 通过并发布", callback_data: `approve:${submission.id}` },
+    { text: "❌ 拒绝…", callback_data: `reject:${submission.id}` },
+  ]);
+  rows.push([
+    { text: "✏️ 改名并通过…", callback_data: `rename-manual:${submission.id}` },
+    { text: "📝 编辑并发布…", callback_data: `edit:${submission.id}` },
+  ]);
+  return { inline_keyboard: rows };
 }
 
 function conflictStateKey(id) {
   return `settings/telegram/conflict/${id}`;
 }
 
-function conflictKeyboard(id, suggestions) {
+function conflictKeyboard(submission, suggestions) {
+  const id = submission.id;
   const list = (Array.isArray(suggestions) ? suggestions : []).filter((name) => typeof name === "string" && name.trim());
   const rows = [];
+  if (submission?.url) rows.push([{ text: "🖼 打开原图", url: submission.url }]);
   // Offer a single one-tap suggestion plus a manual rename so reviewers can
   // type any name instead of being limited to generated suggestions.
   if (list[0]) rows.push([{ text: `✏️ 用建议名通过：${truncate(list[0], 32)}`, callback_data: `rename:${id}:0` }]);
@@ -236,6 +287,103 @@ async function readReviewSubmission(env, id) {
   return env.DB.prepare(
     "SELECT id, name, url, note, status, reviewer_note FROM submissions WHERE id = ?1",
   ).bind(id).first();
+}
+
+// Oldest-first list of pending submissions, used by /queue and the "next" button.
+async function listPendingSubmissions(env, limit = QUEUE_LIMIT) {
+  if (!env.DB) return [];
+  const result = await env.DB.prepare(
+    "SELECT id, name, url, note, status, created_at FROM submissions WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?1",
+  ).bind(limit).all();
+  return result.results || [];
+}
+
+async function nextPendingSubmission(env, currentId) {
+  let rows = [];
+  try {
+    rows = await listPendingSubmissions(env, QUEUE_LIMIT + 1);
+  } catch {
+    return null;
+  }
+  const queue = rows.filter((row) => row && row.id && row.id !== currentId);
+  if (!queue.length) return null;
+  return { id: queue[0].id, remaining: queue.length, capped: queue.length > QUEUE_LIMIT };
+}
+
+async function nextPendingKeyboard(env, currentId) {
+  const next = await nextPendingSubmission(env, currentId);
+  if (!next) return { inline_keyboard: [] };
+  const suffix = next.remaining > 1 ? `（剩 ${next.remaining}${next.capped ? "+" : ""} 条）` : "";
+  return { inline_keyboard: [[{ text: `⏭ 下一条待审核${suffix}`, callback_data: `view:${next.id}` }]] };
+}
+
+function waitLabel(createdAt) {
+  const started = Number(createdAt);
+  if (!Number.isFinite(started)) return "未知";
+  const minutes = Math.max(0, Math.floor((Date.now() - started) / 60000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+function queueMessage(rows) {
+  if (!rows.length) return "📋 <b>待审核队列</b>\n\n🎉 当前没有待审核的提交。";
+  const lines = [`📋 <b>待审核队列</b>（${rows.length} 条）`];
+  rows.forEach((row, index) => {
+    lines.push(`${index + 1}. <b>${htmlTruncate(row.name, 80)}</b> · 等待 ${waitLabel(row.created_at)}`);
+    lines.push(`<code>${htmlTruncate(row.id, 40)}</code>`);
+  });
+  return lines.join("\n");
+}
+
+function queueKeyboard(rows) {
+  return {
+    inline_keyboard: rows.slice(0, QUEUE_PAGE_SIZE).map((row, index) => ([
+      { text: `${index + 1}. 审核 ${truncate(row.name, 24)}`, callback_data: `view:${row.id}` },
+    ])),
+  };
+}
+
+// Parse the free-text "edit and publish" reply. Fields are order-independent and
+// accept both half- and full-width colons; unknown lines extend the last field.
+function parseEditInput(text) {
+  const fields = {};
+  let current = null;
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = /^(名称|名字|标题|URL|链接|地址|说明|描述)\s*[:：]\s*(.*)$/i.exec(line);
+    if (!match) {
+      if (current) fields[current] = `${fields[current]}\n${line}`;
+      continue;
+    }
+    const label = match[1].toLowerCase();
+    current = /^(名称|名字|标题)$/.test(label) ? "name"
+      : /^(url|链接|地址)$/.test(label) ? "url" : "description";
+    fields[current] = match[2].trim();
+  }
+  return fields;
+}
+
+// Toast text shown on the callback button. Distinct per action, and answered
+// before any database or publication work begins.
+function callbackToast(action) {
+  switch (action) {
+    case "approve": return "正在准备发布…";
+    case "approve-confirm": return "正在发布，请稍候…";
+    case "rename": return "正在改名并发布…";
+    case "rename-manual": return "请回复新的图标名称…";
+    case "edit": return "请回复修改后的名称、URL 和说明…";
+    case "reject": return "请回复拒绝原因…";
+    case "reject-preset": return "正在记录拒绝原因…";
+    case "reject-empty": return "正在拒绝该提交…";
+    case "replace": return "请确认是否替换…";
+    case "replace-confirm": return "正在替换并发布…";
+    case "cancel": return "已取消操作";
+    case "view": return "正在打开下一条待审核…";
+    default: return "正在处理…";
+  }
 }
 
 function manualRenamePromptText(name, suggestion) {
@@ -380,24 +528,29 @@ export async function notifyNewSubmission(env, submission, origin = "") {
       }).catch(() => {});
     }
   }
-  let text = submissionMessage(submission);
-  let keyboard = settings.webhookSecret ? submissionKeyboard(submission.id) : null;
+  await postReviewCard(env, settings, submission, { withKeyboard: Boolean(settings.webhookSecret) });
+  return true;
+}
+
+// Build a fresh review card message, including conflict handling. Shared by new
+// submissions and the "next pending" jump so the buttons always match the state.
+async function postReviewCard(env, settings, submission, { withKeyboard = true } = {}) {
+  let status = "🕓 待审核";
+  let detail = "";
+  let keyboard = withKeyboard ? submissionKeyboard(submission) : null;
   const existing = await findSubmissionConflict(env, submission.name);
   if (existing) {
     const notice = conflictNotice(submission.name, { conflict: existing.conflict, suggestions: existing.suggestions });
-    text = `${text}\n\n${notice.text}`;
-    if (settings.webhookSecret) {
+    detail = notice.text;
+    status = "⚠️ 待审核 · 名称冲突";
+    if (withKeyboard && env.EMBY_ICONS) {
       await env.EMBY_ICONS.put(conflictStateKey(submission.id), JSON.stringify({
-        id: submission.id,
-        name: submission.name,
-        suggestions: notice.suggestions,
-        createdAt: Date.now(),
+        id: submission.id, name: submission.name, suggestions: notice.suggestions, createdAt: Date.now(),
       }));
-      keyboard = conflictKeyboard(submission.id, notice.suggestions);
+      keyboard = conflictKeyboard(submission, notice.suggestions);
     }
   }
-  await sendTelegramMessage(settings.token, settings.chatId, text, keyboard);
-  return true;
+  return sendCard(settings, submission, status, keyboard, detail);
 }
 
 export async function queueSubmissionNotification(env, submission, waitUntil, origin = "") {
@@ -423,7 +576,7 @@ async function readReviewState(env, key) {
   if (!raw) return null;
   try {
     const state = JSON.parse(raw);
-    if (state?.id && state.messageId && state.userId && state.nonce && ["rename", "reject", "replace"].includes(state.action)) return state;
+    if (state?.id && state.messageId && state.userId && state.nonce && ["rename", "reject", "replace", "approve", "edit"].includes(state.action)) return state;
   } catch { /* Discard malformed state without treating a reply as a decision. */ }
   await env.EMBY_ICONS.delete(key);
   return null;
@@ -439,24 +592,66 @@ function expired(state) {
 }
 
 function stateMessage(settings, state) {
-  return { chat: { id: settings.chatId }, message_id: state.messageId };
+  return { chat: { id: settings.chatId }, message_id: state.messageId, cardKind: state.cardKind };
+}
+
+function cardKindOf(message) {
+  if (message?.cardKind === "photo" || message?.cardKind === "text") return message.cardKind;
+  if (Array.isArray(message?.photo)) return "photo";
+  return "text";
 }
 
 async function editCard(settings, message, submission, status, keyboard = { inline_keyboard: [] }, detail = "") {
   if (!message?.message_id) return false;
-  try {
-    await telegramApi(settings.token, "editMessageText", {
+  const kind = cardKindOf(message);
+  const payload = kind === "photo"
+    ? {
       chat_id: settings.chatId,
       message_id: message.message_id,
-      text: submissionMessage(submission, status, detail),
+      caption: submissionMessage(submission, status, detail, CAPTION_LIMIT),
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    }
+    : {
+      chat_id: settings.chatId,
+      message_id: message.message_id,
+      text: submissionMessage(submission, status, detail, TEXT_LIMIT),
+      parse_mode: "HTML",
       disable_web_page_preview: true,
       reply_markup: keyboard,
-    });
+    };
+  try {
+    await telegramApi(settings.token, kind === "photo" ? "editMessageCaption" : "editMessageText", payload);
     return true;
   } catch (error) {
     // A duplicate webhook may redraw the same card. That is already success.
     if (/message is not modified/i.test(error.message)) return true;
     return false;
+  }
+}
+
+// Prefer a photo card so the reviewer sees the icon, and fall back to a plain
+// text card for URLs Telegram cannot render as a photo (SVG/ICO, unreachable...).
+async function sendCard(settings, submission, status, keyboard, detail = "") {
+  const markup = keyboard ? { reply_markup: keyboard } : {};
+  try {
+    const result = await telegramApi(settings.token, "sendPhoto", {
+      chat_id: settings.chatId,
+      photo: submission.url,
+      caption: submissionMessage(submission, status, detail, CAPTION_LIMIT),
+      parse_mode: "HTML",
+      ...markup,
+    });
+    return { message_id: result.message_id, cardKind: "photo" };
+  } catch {
+    const result = await telegramApi(settings.token, "sendMessage", {
+      chat_id: settings.chatId,
+      text: submissionMessage(submission, status, detail, TEXT_LIMIT),
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...markup,
+    });
+    return { message_id: result.message_id, cardKind: "text" };
   }
 }
 
@@ -486,20 +681,30 @@ async function refreshCard(env, settings, message, submission, detail = "") {
   const conflict = await findSubmissionConflict(env, submission.name);
   if (conflict) {
     const notice = await saveConflict(env, submission.id, submission.name, conflict);
-    return editCard(settings, message, submission, "⚠️ 待审核 · 名称冲突", conflictKeyboard(submission.id, notice.suggestions), [detail, notice.text].filter(Boolean).join("\n"));
+    return editCard(settings, message, submission, "⚠️ 待审核 · 名称冲突", conflictKeyboard(submission, notice.suggestions), [detail, notice.text].filter(Boolean).join("\n"));
   }
   await env.EMBY_ICONS.delete(conflictStateKey(submission.id)).catch(() => {});
-  return editCard(settings, message, submission, "🕓 待审核", submissionKeyboard(submission.id), detail);
+  return editCard(settings, message, submission, "🕓 待审核", submissionKeyboard(submission), detail);
 }
 
 async function retirePrompt(settings, state, text = "本次输入已结束，请使用审核卡片上的按钮继续。") {
   if (!state?.promptMessageId) return;
-  await telegramApi(settings.token, "editMessageText", {
-    chat_id: settings.chatId,
-    message_id: state.promptMessageId,
-    text: `${text}\n编号：${state.id}`,
-    reply_markup: { inline_keyboard: [] },
-  }).catch(() => {});
+  // Delete the one-off input prompt so it does not linger after the reviewer
+  // replies (for example with /reject) or cancels. Only fall back to a short,
+  // keyboard-free note if Telegram refuses the deletion (e.g. message is old).
+  try {
+    await telegramApi(settings.token, "deleteMessage", {
+      chat_id: settings.chatId,
+      message_id: state.promptMessageId,
+    });
+  } catch {
+    await telegramApi(settings.token, "editMessageText", {
+      chat_id: settings.chatId,
+      message_id: state.promptMessageId,
+      text: `${text}\n编号：${state.id}`,
+      reply_markup: { inline_keyboard: [] },
+    }).catch(() => {});
+  }
 }
 
 async function clearState(env, settings, key, state) {
@@ -519,13 +724,13 @@ async function answerCallback(token, callbackId, text) {
   });
 }
 
-async function executeAdminDecision(request, env, id, action, note = "", name = "") {
+async function executeAdminDecision(request, env, id, action, payload = {}) {
   const { handleAdminSubmissionDecision } = await import("./submissions.js");
   return handleAdminSubmissionDecision(
     new Request(request.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${env.ADMIN_TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ action, note, ...(name ? { name } : {}) }),
+      body: JSON.stringify({ action, ...payload }),
     }), env, id,
   );
 }
@@ -536,7 +741,11 @@ function cancelButton(state) {
 
 function inputKeyboard(state) {
   const rows = [];
+  if (state.action === "approve") {
+    rows.push([{ text: "✅ 确认通过并发布", callback_data: `approve-confirm:${state.id}:${state.nonce}` }]);
+  }
   if (state.action === "reject") {
+
     REJECT_REASONS.forEach((reason, index) => rows.push([
       { text: `❌ ${reason}`, callback_data: `reject-preset:${state.id}:${state.nonce}:${index}` },
     ]));
@@ -553,11 +762,19 @@ async function sendInputPrompt(env, settings, key, state, row, detail = "") {
   const suggestion = state.action === "rename" ? await readSuggestedName(env, row.id, 0) : "";
   const text = state.action === "rename"
     ? manualRenamePromptText(row.name, suggestion)
-    : [
-      `📝 请直接回复「${row.name}」的拒绝原因。`,
-      "也可点击卡片上的常用原因；不填原因可发送 /reject 或 /skip。",
-      "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
-    ].join("\n");
+    : state.action === "edit"
+      ? [
+        `📝 请回复「${row.name}」的修改内容，每个字段一行：`,
+        "名称：新名称",
+        "URL：https://example.com/icon.png",
+        "说明：可选（不写则保持原说明）",
+        "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
+      ].join("\n")
+      : [
+        `📝 请直接回复「${row.name}」的拒绝原因。`,
+        "也可点击卡片上的常用原因；不填原因可发送 /reject 或 /skip。",
+        "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
+      ].join("\n");
   const prompt = await telegramApi(settings.token, "sendMessage", {
     chat_id: settings.chatId,
     text: [`${state.userName}，`, detail, text, `编号：${row.id}`].filter(Boolean).join("\n"),
@@ -569,7 +786,9 @@ async function sendInputPrompt(env, settings, key, state, row, detail = "") {
     reply_markup: {
       force_reply: true,
       selective: true,
-      input_field_placeholder: state.action === "rename" ? "新名称（发送后通过审核）" : "输入拒绝原因",
+      input_field_placeholder: state.action === "rename"
+        ? "新名称（发送后通过审核）"
+        : state.action === "edit" ? "名称/URL/说明（多行）" : "输入拒绝原因",
     },
   });
   const oldPrompt = state.promptMessageId;
@@ -588,7 +807,7 @@ async function beginInput(env, settings, key, previous, message, row, action, re
     }
   }
   const state = {
-    id: row.id, action, messageId: message.message_id,
+    id: row.id, action, messageId: message.message_id, cardKind: cardKindOf(message),
     userId: String(reviewer.id), userName: truncate(reviewer.first_name || "审核人", 40),
     nonce: createSecret().slice(0, 8), createdAt: Date.now(),
   };
@@ -606,6 +825,10 @@ async function beginInput(env, settings, key, previous, message, row, action, re
     status = conflict
       ? `⚠️ 确认替换「${conflict.conflict.name}」？\n将覆盖该条目的图片地址，其他图标不受影响。\n现有 URL：${truncate(conflict.conflict.url, 600)}\n10 分钟内有效，请确认后发布。`
       : "当前已无同名图标，确认后将直接发布。";
+  } else if (action === "approve") {
+    status = "🛡️ 确认通过并发布？\n点击下方按钮后立即上线，避免误触；10 分钟内有效。";
+  } else if (action === "edit") {
+    status = "📝 等待编辑内容 · 回复下方提示后按修改后的信息直接发布";
   } else {
     status = action === "rename"
       ? "⏳ 等待新名称 · 回复下方提示后将改名并通过"
@@ -618,7 +841,7 @@ async function beginInput(env, settings, key, previous, message, row, action, re
     await sendTelegramMessage(settings.token, settings.chatId, "审核卡片更新失败，尚未提交操作，请重新点击原按钮。");
     return;
   }
-  if (action !== "replace") {
+  if (action !== "replace" && action !== "approve") {
     try {
       await sendInputPrompt(env, settings, key, state, row);
     } catch {
@@ -628,20 +851,24 @@ async function beginInput(env, settings, key, previous, message, row, action, re
   }
 }
 
-async function finishDecision(request, env, settings, key, state, message, row, action, note = "", name = "") {
-  const response = await executeAdminDecision(request, env, row.id, action, note, name);
+async function finishDecision(request, env, settings, key, state, message, row, action, payload = {}) {
+  const response = await executeAdminDecision(request, env, row.id, action, payload);
   const body = await response.json().catch(() => ({}));
   const latest = await readReviewSubmission(env, row.id);
   if (response.ok) {
     if (state?.id === row.id) await clearState(env, settings, key, state);
     await env.EMBY_ICONS.delete(conflictStateKey(row.id)).catch(() => {});
     const label = action === "replace" ? "♻️ 已替换现有图标并发布"
-      : action === "approve-rename" ? `✅ 已改名为「${latest?.name || name}」并通过`
+      : action === "approve-rename" ? `✅ 已改名为「${latest?.name || payload.name || row.name}」并通过`
+        : action === "edit" ? `✅ 已编辑并发布：${latest?.name || payload.name || row.name}`
         : resolvedStatus(latest || row);
-    const edited = await editCard(settings, message, latest || row, label);
+    // Offer the next pending submission so reviewers never scroll back.
+    const keyboard = await nextPendingKeyboard(env, row.id);
+    const edited = await editCard(settings, message, latest || row, label, keyboard);
     if (!edited) {
       // A completed decision must remain visible even if its original card was deleted.
-      await sendTelegramMessage(settings.token, settings.chatId, submissionMessage(latest || row, label));
+      await sendHtmlMessage(settings.token, settings.chatId,
+        submissionMessage(latest || row, label, "", TEXT_LIMIT), keyboard);
     }
     return;
   }
@@ -651,9 +878,9 @@ async function finishDecision(request, env, settings, key, state, message, row, 
     return;
   }
   if (body.code === "ICON_NAME_CONFLICT") {
-    const notice = await saveConflict(env, row.id, name || row.name, body);
-    const keyboard = conflictKeyboard(row.id, notice.suggestions);
-    if (state?.id === row.id && state.action === "rename") {
+    const notice = await saveConflict(env, row.id, payload.name || row.name, body);
+    const keyboard = conflictKeyboard(latest || row, notice.suggestions);
+    if (state?.id === row.id && ["rename", "edit"].includes(state.action)) {
       keyboard.inline_keyboard.push([cancelButton(state)]);
       await editCard(settings, message, latest || row, "⚠️ 名称冲突 · 可继续输入新名称", keyboard, notice.text);
       await sendInputPrompt(env, settings, key, state, latest || row, notice.text);
@@ -663,7 +890,7 @@ async function finishDecision(request, env, settings, key, state, message, row, 
     return;
   }
   const errorText = `审核未完成：${truncate(body.error || "处理失败，请重试", 240)}`;
-  if (state?.id === row.id && state.action !== "replace") {
+  if (state?.id === row.id && ["rename", "reject", "edit"].includes(state.action)) {
     await sendInputPrompt(env, settings, key, state, latest || row, errorText);
   } else {
     if (latest) await refreshCard(env, settings, message, latest, errorText);
@@ -678,14 +905,15 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     await answerCallback(settings.token, callback.id, "此聊天或操作人未授权").catch(() => {});
     return;
   }
-  const match = /^(approve|reject|replace|rename-manual|rename|cancel|reject-preset|reject-empty|replace-confirm):([0-9a-f-]{36})(?::([0-9a-f]{1,8}))?(?::([0-2]))?$/i.exec(String(callback.data || ""));
+  const match = /^(approve|approve-confirm|reject|replace|rename-manual|rename|edit|cancel|view|reject-preset|reject-empty|replace-confirm):([0-9a-f-]{36})(?::([0-9a-f]{1,8}))?(?::([0-2]))?$/i.exec(String(callback.data || ""));
   if (!match) {
     await answerCallback(settings.token, callback.id, "无效的审核操作").catch(() => {});
     return;
   }
-  // Stop Telegram's button spinner before any database/publication work.
-  await answerCallback(settings.token, callback.id, "正在处理审核…").catch(() => {});
   const action = match[1].toLowerCase();
+  // Stop Telegram's button spinner before any database/publication work, with
+  // a toast that matches what the reviewer actually triggered.
+  await answerCallback(settings.token, callback.id, callbackToast(action)).catch(() => {});
   const id = match[2];
   const key = reviewStateKey(chatId, userId);
   let state = await readReviewState(env, key);
@@ -695,13 +923,19 @@ async function handleCallbackUpdate(request, env, settings, callback) {
     await editCard(settings, callback.message, { id }, resolvedStatus(null));
     return;
   }
+  // Reuse the result card as the next review card so reviewers can keep working
+  // down the queue without scrolling back to older messages.
+  if (action === "view") {
+    await postReviewCard(env, settings, row, { withKeyboard: true });
+    return;
+  }
   if (row.status !== "pending" && !(row.status === "approving" && action === "approve")) {
     if (state?.id === id) await clearState(env, settings, key, state);
     await refreshCard(env, settings, callback.message, row);
     return;
   }
-  if (["cancel", "reject-preset", "reject-empty", "replace-confirm"].includes(action)) {
-    const expectedAction = action.startsWith("reject-") ? "reject" : "replace";
+  if (["cancel", "reject-preset", "reject-empty", "replace-confirm", "approve-confirm"].includes(action)) {
+    const expectedAction = action.startsWith("reject-") ? "reject" : action === "approve-confirm" ? "approve" : "replace";
     if (!state || state.id !== id || state.nonce !== match[3] || state.messageId !== callback.message.message_id
       || (action !== "cancel" && state.action !== expectedAction)) {
       await sendTelegramMessage(settings.token, settings.chatId, "此按钮已失效或属于其他审核人，请使用自己的最新审核操作。");
@@ -713,6 +947,10 @@ async function handleCallbackUpdate(request, env, settings, callback) {
       await refreshCard(env, settings, callback.message, row, detail);
       return;
     }
+    if (action === "approve-confirm") {
+      await finishDecision(request, env, settings, key, state, callback.message, row, "approve", {});
+      return;
+    }
     if (action === "replace-confirm") {
       const current = await findSubmissionConflict(env, row.name, true);
       const conflict = current ? { name: current.conflict.name, url: current.conflict.url } : null;
@@ -721,28 +959,40 @@ async function handleCallbackUpdate(request, env, settings, callback) {
         await sendTelegramMessage(settings.token, settings.chatId, "同名图标已发生变化，请核对新的替换确认卡片。");
         return;
       }
-      await finishDecision(request, env, settings, key, state, callback.message, row, "replace");
+      await finishDecision(request, env, settings, key, state, callback.message, row, "replace", {});
       return;
     }
     if (action === "reject-preset" && match[4] === undefined) return;
     const reason = action === "reject-preset" ? REJECT_REASONS[Number(match[4])] : "";
-    await finishDecision(request, env, settings, key, state, callback.message, row, "reject", reason);
+    await finishDecision(request, env, settings, key, state, callback.message, row, "reject", { note: reason });
     return;
   }
-  if (["reject", "rename-manual", "replace"].includes(action)) {
+  if (action === "approve") {
+    // A fresh approval asks for an explicit confirmation click; an "approving"
+    // retry (already confirmed) publishes straight away.
+    if (row.status === "approving") {
+      await finishDecision(request, env, settings, key, state, callback.message, row, "approve", {});
+      return;
+    }
+    await beginInput(env, settings, key, state, callback.message, row, "approve", callback.from);
+    return;
+  }
+  if (["reject", "rename-manual", "replace", "edit"].includes(action)) {
     await beginInput(env, settings, key, state, callback.message, row, action === "rename-manual" ? "rename" : action, callback.from);
     return;
   }
-  let name = "";
   if (action === "rename") {
-    name = await readSuggestedName(env, id, Number(match[3] || 0));
+    const name = await readSuggestedName(env, id, Number(match[3] || 0));
     if (!name) {
       await refreshCard(env, settings, callback.message, row, "改名建议已失效，已刷新可用操作。");
       return;
     }
+    await finishDecision(request, env, settings, key, state, callback.message, row, "approve-rename", { name });
+    return;
   }
-  await finishDecision(request, env, settings, key, state, callback.message, row, action === "rename" ? "approve-rename" : "approve", "", name);
+  await refreshCard(env, settings, callback.message, row);
 }
+
 
 async function cancelLegacyInput(env, settings, chatId) {
   let restored = false;
@@ -768,8 +1018,18 @@ async function handleMessageUpdate(env, settings, message) {
   const userId = String(message.from?.id || "");
   if (chatId !== settings.chatId || !userId || message.from?.is_bot) return;
   const key = reviewStateKey(chatId, userId);
-  const state = await readReviewState(env, key);
   const text = String(message.text || "").trim();
+  // /queue is read-only and works whether or not a review input is pending.
+  if (/^\/queue(?:@[^\s]+)?$/i.test(text)) {
+    try {
+      const rows = await listPendingSubmissions(env);
+      await sendHtmlMessage(settings.token, settings.chatId, queueMessage(rows), queueKeyboard(rows));
+    } catch {
+      await sendTelegramMessage(settings.token, settings.chatId, "读取待审核队列失败，请稍后重试。");
+    }
+    return;
+  }
+  const state = await readReviewState(env, key);
   const command = /^\/(cancel|reject|skip)(?:@[^\s]+)?(?:\s+(.*))?$/is.exec(text);
   if (!state) {
     if (command?.[1].toLowerCase() === "cancel" && await cancelLegacyInput(env, settings, chatId)) {
@@ -807,8 +1067,34 @@ async function handleMessageUpdate(env, settings, message) {
     await sendTelegramMessage(settings.token, settings.chatId, "请使用卡片上的确认替换或取消按钮，文字回复不会发布。");
     return;
   }
+  if (state.action === "approve") {
+    await sendTelegramMessage(settings.token, settings.chatId, "请点击卡片上的「✅ 确认通过并发布」按钮完成发布，或发送 /cancel 取消。");
+    return;
+  }
   if (!text) {
     await sendInputPrompt(env, settings, key, state, row, "请发送文字内容，不支持图片、贴纸或附件。");
+    return;
+  }
+  if (state.action === "edit") {
+    const fields = parseEditInput(text);
+    const name = String(fields.name || "").trim();
+    const url = String(fields.url || "").trim();
+    const description = String(fields.description || "").trim();
+    if (!name || name.length > 120) {
+      await sendInputPrompt(env, settings, key, state, row, "名称需为 1-120 个字符，请按“名称：/URL：/说明：”重新回复。");
+      return;
+    }
+    if (!url || url.length > 2048) {
+      await sendInputPrompt(env, settings, key, state, row, "URL 必填且不超过 2048 个字符，请按格式重新回复。");
+      return;
+    }
+    if (description.length > 1000) {
+      await sendInputPrompt(env, settings, key, state, row, "说明不能超过 1000 个字符，请重新回复。");
+      return;
+    }
+    await finishDecision(new Request("https://telegram-webhook.invalid"), env, settings, key, state,
+      stateMessage(settings, state), row, "edit",
+      fields.description === undefined ? { name, url } : { name, url, description });
     return;
   }
   const isRejectCommand = state.action === "reject" && ["reject", "skip"].includes(command?.[1].toLowerCase());
@@ -825,8 +1111,9 @@ async function handleMessageUpdate(env, settings, message) {
   }
   await finishDecision(new Request("https://telegram-webhook.invalid"), env, settings, key, state,
     stateMessage(settings, state), row, state.action === "rename" ? "approve-rename" : "reject",
-    state.action === "reject" ? value : "", state.action === "rename" ? value : "");
+    state.action === "reject" ? { note: value } : { name: value });
 }
+
 
 export async function handleTelegramWebhook(request, env, secretParam) {
   if (!env.EMBY_ICONS) return new Response("Not found", { status: 404 });

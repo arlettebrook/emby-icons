@@ -81,12 +81,23 @@ function pendingState(env, userId = USER_ID, chatId = CHAT_ID) {
 }
 
 function lastReviewEdit(messageId = 10) {
-  return mock.method("editMessageText").filter((call) => call.payload.message_id === messageId).at(-1);
+  return mock.calls
+    .filter((call) => call.method === "editMessageText" || call.method === "editMessageCaption")
+    .filter((call) => call.payload.message_id === messageId)
+    .at(-1);
+}
+
+function lastCardSend() {
+  return mock.calls.filter((call) => call.method === "sendPhoto" || call.method === "sendMessage").at(-1);
+}
+
+function cardText(call) {
+  return call?.payload?.caption || call?.payload?.text || "";
 }
 
 function buttonData(action, messageId = 10) {
-  return lastReviewEdit(messageId)?.payload.reply_markup.inline_keyboard.flat()
-    .find((button) => button.callback_data.startsWith(action + ":"))?.callback_data;
+  return lastReviewEdit(messageId)?.payload.reply_markup?.inline_keyboard.flat()
+    .find((button) => button.callback_data?.startsWith(action + ":"))?.callback_data;
 }
 
 function message(secret, env, text, messageId = 11, options = {}) {
@@ -122,9 +133,9 @@ test("telegram notification flags a conflicting submission and offers recovery b
 
     await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
 
-    const send = mock.method("sendMessage").at(-1);
-    assert.ok(send, "expected a sendMessage call");
-    assert.match(send.payload.text, /名称冲突/);
+    const send = lastCardSend();
+    assert.ok(send, "expected a card send");
+    assert.match(cardText(send), /名称冲突/);
     const buttons = send.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
     assert.ok(buttons.includes(`rename:${id}:0`));
     assert.ok(buttons.includes(`replace:${id}`));
@@ -146,6 +157,10 @@ test("approving a conflicting submission via Telegram redraws the conflict keybo
 
     const response = await callback(secret, env, `approve:${id}`);
     assert.equal(response.status, 200);
+    // Approving is two-step: the first tap only asks for confirmation.
+    assert.match(lastReviewEdit().payload.text, /确认通过并发布/);
+
+    await callback(secret, env, buttonData("approve-confirm"));
 
     const edit = lastReviewEdit();
     assert.ok(edit, "expected an editMessageText call");
@@ -177,7 +192,7 @@ test("renaming via Telegram publishes under the suggested name", async () => {
     assert.equal(env.DB.submissions.get(id).status, "approved");
     assert.equal(env.DB.submissions.get(id).name, "OkEmby02");
     const answer = mock.method("answerCallbackQuery").at(-1);
-    assert.match(answer.payload.text, /正在处理/);
+    assert.match(answer.payload.text, /正在改名并发布/);
     assert.match(lastReviewEdit().payload.text, /已改名为「OkEmby02」/);
   } finally {
     mock.restore();
@@ -192,7 +207,7 @@ test("manual rename via Telegram publishes under the typed name", async () => {
     const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
 
     await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
-    const buttons = mock.method("sendMessage").at(-1).payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    const buttons = lastCardSend().payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
     assert.ok(buttons.includes(`rename-manual:${id}`), "expected a manual rename button");
 
     await callback(secret, env, `rename-manual:${id}`);
@@ -349,7 +364,7 @@ test("plain review messages offer a manual rename", async () => {
     const id = await createSubmission(env, "OkEmby", "https://example.com/new.png");
 
     await notifyNewSubmission(env, { id, name: "OkEmby", url: "https://example.com/new.png", note: "" }, "https://example.com");
-    const buttons = mock.method("sendMessage").at(-1).payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    const buttons = lastCardSend().payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
     assert.ok(buttons.includes(`approve:${id}`));
     assert.ok(buttons.includes(`rename-manual:${id}`), "expected a manual rename button on a plain review");
 
@@ -434,6 +449,19 @@ telegramTest("reject menu offers common reasons and a scoped cancel button", asy
   assert.deepEqual(lastReviewEdit().payload.reply_markup.inline_keyboard, []);
   assert.match(lastReviewEdit().payload.text, /已拒绝\n原因：图片模糊或质量不佳/);
   assert.equal(readKv(env).icons.length, 0);
+});
+
+telegramTest("finishing a reject removes the one-off input prompt but keeps the card", async ({ env, secret }) => {
+  const id = await createSubmission(env, "CleanPrompt", "https://example.com/clean.png");
+  await callback(secret, env, `reject:${id}`);
+  const promptId = pendingState(env).promptMessageId;
+  assert.ok(promptId, "expected a reply prompt");
+  await message(secret, env, "/reject", 12, { replyTo: promptId });
+  assert.equal(env.DB.submissions.get(id).status, "rejected");
+  const deletedIds = mock.method("deleteMessage").map((call) => call.payload.message_id);
+  assert.ok(deletedIds.includes(promptId), "the input prompt should be removed");
+  assert.ok(!deletedIds.includes(10), "the review card must not be deleted");
+  assert.equal(pendingState(env), null);
 });
 
 telegramTest("empty rejection requires the explicit confirmation button", async ({ env, secret }) => {
@@ -553,15 +581,21 @@ telegramTest("switching rename to reject never publishes the rejection text as a
   assert.equal(readKv(env).icons.length, 0);
 });
 
-telegramTest("approving another card does not clear an unrelated pending input", async ({ env, secret }) => {
+telegramTest("starting an approval on another card replaces the previous flow safely", async ({ env, secret }) => {
   const a = await createSubmission(env, "StillWaiting", "https://example.com/a.png");
   const b = await createSubmission(env, "ApprovedNow", "https://example.com/b.png");
   await callback(secret, env, `rename-manual:${a}`);
   await callback(secret, env, `approve:${b}`, "b", { messageId: 20 });
-  assert.equal(pendingState(env).id, a);
+  assert.equal(pendingState(env).id, b);
+  assert.equal(pendingState(env).action, "approve");
+  // Free text while a confirmation is pending must not publish or reject anything.
   await message(secret, env, "StillWaitingRenamed");
-  assert.equal(env.DB.submissions.get(a).status, "approved");
+  assert.equal(env.DB.submissions.get(a).status, "pending");
+  assert.equal(env.DB.submissions.get(b).status, "pending");
+  assert.match(mock.method("sendMessage").at(-1).payload.text, /确认通过并发布/);
+  await callback(secret, env, buttonData("approve-confirm", 20), "confirm", { messageId: 20 });
   assert.equal(env.DB.submissions.get(b).status, "approved");
+  assert.equal(env.DB.submissions.get(a).status, "pending");
 });
 
 telegramTest("stale buttons on resolved submissions show the real status without starting a new prompt", async ({ env, secret }) => {
@@ -639,7 +673,9 @@ telegramTest("long content fits message limits and callback data stays under 64 
   await message(secret, env, "拒".repeat(1000));
   for (const call of mock.calls) {
     if (call.payload.text) assert.ok(call.payload.text.length <= 4096);
+    if (call.payload.caption) assert.ok(call.payload.caption.length <= 1024);
     for (const button of call.payload.reply_markup?.inline_keyboard?.flat() || []) {
+      if (!button.callback_data) continue;
       assert.ok(Buffer.byteLength(button.callback_data, "utf8") <= 64);
     }
   }
@@ -676,16 +712,23 @@ telegramTest("callback acknowledgement precedes database work", async ({ env, se
     return prepare(sql);
   };
   await callback(secret, env, `approve:${id}`);
-  assert.equal(env.DB.submissions.get(id).status, "approved");
+  assert.equal(env.DB.submissions.get(id).status, "pending");
   assert.equal(mock.method("answerCallbackQuery").length, 1);
+  await callback(secret, env, buttonData("approve-confirm"));
+  assert.equal(env.DB.submissions.get(id).status, "approved");
+  assert.equal(mock.method("answerCallbackQuery").length, 2);
 });
 
 telegramTest("completed decisions fall back to a result message when the card cannot be edited", async ({ env, secret }) => {
   const id = await createSubmission(env, "MissingCard", "https://example.com/missing.png");
   await callback(secret, env, `approve:${id}`);
+  await callback(secret, env, buttonData("approve-confirm"));
   assert.equal(env.DB.submissions.get(id).status, "approved");
   assert.match(mock.method("sendMessage").at(-1).payload.text, /已通过并发布/);
-}, { mock: { fail: (method) => method === "editMessageText" ? "Bad Request: message to edit not found" : "" } });
+}, { mock: { fail: (() => {
+  let edits = 0;
+  return (method) => (method === "editMessageText" && ++edits > 1) ? "Bad Request: message to edit not found" : "";
+})() } });
 
 telegramTest("a failed prompt send restores the card without leaving an invisible input session", async ({ env, secret }) => {
   const id = await createSubmission(env, "PromptFailure", "https://example.com/prompt.png");
@@ -741,4 +784,100 @@ test("replacement restores the card when the new icon document cannot be validat
   } finally {
     mock.restore();
   }
+});
+
+
+test("the /queue command lists pending submissions with jump buttons", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const first = await createSubmission(env, "QueueA", "https://example.com/a.png");
+    const second = await createSubmission(env, "QueueB", "https://example.com/b.png");
+
+    await message(secret, env, "/queue");
+
+    const send = mock.method("sendMessage").at(-1);
+    assert.equal(send.payload.parse_mode, "HTML");
+    assert.match(send.payload.text, /待审核队列/);
+    assert.match(send.payload.text, /QueueA/);
+    assert.match(send.payload.text, /QueueB/);
+    const buttons = send.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+    assert.ok(buttons.includes(`view:${first}`));
+    assert.ok(buttons.includes(`view:${second}`));
+  } finally {
+    mock.restore();
+  }
+});
+
+test("the /queue command reports an empty queue", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/queue");
+
+    assert.match(mock.method("sendMessage").at(-1).payload.text, /没有待审核的提交/);
+  } finally {
+    mock.restore();
+  }
+});
+
+telegramTest("editing and publishing rewrites the name, URL and description", async ({ env, secret }) => {
+  const id = await createSubmission(env, "EditMe", "https://example.com/original.png");
+
+  await callback(secret, env, `edit:${id}`);
+  assert.equal(pendingState(env).action, "edit");
+  const prompt = mock.method("sendMessage").at(-1).payload;
+  assert.match(prompt.text, /修改内容/);
+  assert.equal(prompt.reply_markup.input_field_placeholder, "名称/URL/说明（多行）");
+
+  await message(secret, env, "名称：Edited\nURL：https://example.com/edited.png\n说明：新的说明");
+
+  assert.deepEqual(readKv(env).icons, [{ name: "Edited", url: "https://example.com/edited.png" }]);
+  const row = env.DB.submissions.get(id);
+  assert.equal(row.status, "approved");
+  assert.equal(row.name, "Edited");
+  assert.equal(row.url, "https://example.com/edited.png");
+  assert.equal(row.note, "新的说明");
+  assert.equal(pendingState(env), null);
+});
+
+telegramTest("editing rejects a non-HTTPS URL without publishing", async ({ env, secret }) => {
+  const id = await createSubmission(env, "EditBad", "https://example.com/original.png");
+
+  await callback(secret, env, `edit:${id}`);
+  await message(secret, env, "名称：EditBad\nURL：http://example.com/insecure.png");
+
+  assert.equal(env.DB.submissions.get(id).status, "pending");
+  assert.equal(readKv(env).icons.length, 0);
+  assert.ok(pendingState(env), "the edit flow stays open for another try");
+});
+
+telegramTest("publishing offers the next pending submission", async ({ env, secret }) => {
+  const first = await createSubmission(env, "FirstPending", "https://example.com/1.png");
+  const second = await createSubmission(env, "SecondPending", "https://example.com/2.png");
+
+  await callback(secret, env, `approve:${first}`);
+  await callback(secret, env, buttonData("approve-confirm"));
+
+  const nextButton = buttonData("view");
+  assert.ok(nextButton, "expected a next-pending button after publishing");
+  assert.equal(nextButton, `view:${second}`);
+
+  await callback(secret, env, nextButton);
+  const card = lastCardSend();
+  assert.match(cardText(card), /SecondPending/);
+  assert.ok(card.payload.reply_markup, "next card should carry review buttons");
+});
+
+telegramTest("callback toasts match the action that was triggered", async ({ env, secret }) => {
+  const id = await createSubmission(env, "ToastCopy", "https://example.com/toast.png");
+
+  await callback(secret, env, `reject:${id}`, "open");
+  assert.match(mock.method("answerCallbackQuery").at(-1).payload.text, /请回复拒绝原因/);
+
+  await callback(secret, env, buttonData("cancel"), "cancel");
+  assert.match(mock.method("answerCallbackQuery").at(-1).payload.text, /已取消操作/);
 });
