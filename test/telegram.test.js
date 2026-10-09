@@ -113,12 +113,12 @@ function message(secret, env, text, messageId = 11, options = {}) {
 }
 
 function callback(secret, env, data, callbackId = "cb-1", options = {}) {
-  const { userId = USER_ID, chatId = CHAT_ID, messageId = 10, text = "original" } = options;
+  const { userId = USER_ID, chatId = CHAT_ID, messageId = 10, text = "original", photo } = options;
   return handleTelegramWebhook(
     webhookRequest(secret, {
       callback_query: {
         id: callbackId, from: { id: userId }, data,
-        message: { chat: { id: chatId }, message_id: messageId, text },
+        message: { chat: { id: chatId }, message_id: messageId, ...(photo ? { photo } : { text }) },
       },
     }), env, secret,
   );
@@ -859,10 +859,38 @@ telegramTest("publishing offers the next pending submission", async ({ env, secr
   assert.ok(nextButton, "expected a next-pending button after publishing");
   assert.equal(nextButton, `view:${second}`);
 
+  const sendsBefore = mock.method("sendPhoto").length + mock.method("sendMessage").length;
   await callback(secret, env, nextButton);
-  const card = lastCardSend();
-  assert.match(cardText(card), /SecondPending/);
-  assert.ok(card.payload.reply_markup, "next card should carry review buttons");
+  assert.equal(mock.method("sendPhoto").length + mock.method("sendMessage").length, sendsBefore,
+    "jumping to the next submission must not send a new card");
+  const refreshed = lastReviewEdit();
+  assert.match(refreshed.payload.text, /SecondPending/);
+  assert.ok(refreshed.payload.reply_markup.inline_keyboard.flat()
+    .some((button) => button.callback_data?.startsWith("approve:")), "refreshed card should carry review buttons");
+});
+
+telegramTest("jumping to the next submission swaps the photo card in place", async ({ env, secret }) => {
+  const first = await createSubmission(env, "PhotoFirst", "https://example.com/1.png");
+  const second = await createSubmission(env, "PhotoSecond", "https://example.com/2.png");
+
+  await callback(secret, env, `approve:${first}`);
+  await callback(secret, env, buttonData("approve-confirm"));
+
+  const nextButton = buttonData("view");
+  assert.equal(nextButton, `view:${second}`);
+
+  const sendsBefore = mock.method("sendPhoto").length + mock.method("sendMessage").length;
+  // Pretend the live card is the photo message Telegram rendered.
+  await callback(secret, env, nextButton, "photo-next", { photo: [{ file_id: "first-icon" }] });
+
+  assert.equal(mock.method("sendPhoto").length + mock.method("sendMessage").length, sendsBefore,
+    "a photo card must be refreshed, not resent");
+  const media = mock.method("editMessageMedia").at(-1);
+  assert.ok(media, "photo card should swap media in place");
+  assert.equal(media.payload.media.media, "https://example.com/2.png");
+  assert.match(media.payload.media.caption, /PhotoSecond/);
+  assert.ok(media.payload.reply_markup.inline_keyboard.flat()
+    .some((button) => button.callback_data?.startsWith("approve:")));
 });
 
 telegramTest("callback toasts match the action that was triggered", async ({ env, secret }) => {

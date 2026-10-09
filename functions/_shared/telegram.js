@@ -542,24 +542,28 @@ export async function notifyNewSubmission(env, submission, origin = "") {
   return true;
 }
 
-// Build a fresh review card message, including conflict handling. Shared by new
-// submissions and the "next pending" jump so the buttons always match the state.
-async function postReviewCard(env, settings, submission, { withKeyboard = true } = {}) {
-  let status = "🕓 待审核";
-  let detail = "";
-  let keyboard = withKeyboard ? submissionKeyboard(submission) : null;
+// Conflict-aware fields for a pending submission's card. Persists the suggestion
+// list so the one-tap rename buttons keep working after any refresh.
+async function pendingCardFields(env, submission, withKeyboard) {
   const existing = await findSubmissionConflict(env, submission.name);
-  if (existing) {
-    const notice = conflictNotice(submission.name, { conflict: existing.conflict, suggestions: existing.suggestions });
-    detail = notice.text;
-    status = "⚠️ 待审核 · 名称冲突";
-    if (withKeyboard && env.EMBY_ICONS) {
-      await env.EMBY_ICONS.put(conflictStateKey(submission.id), JSON.stringify({
-        id: submission.id, name: submission.name, suggestions: notice.suggestions, createdAt: Date.now(),
-      }));
-      keyboard = conflictKeyboard(submission, notice.suggestions);
-    }
+  if (!existing) {
+    return { status: "🕓 待审核", detail: "", keyboard: withKeyboard ? submissionKeyboard(submission) : null };
   }
+  const notice = conflictNotice(submission.name, { conflict: existing.conflict, suggestions: existing.suggestions });
+  let keyboard = withKeyboard ? submissionKeyboard(submission) : null;
+  if (withKeyboard && env.EMBY_ICONS) {
+    await env.EMBY_ICONS.put(conflictStateKey(submission.id), JSON.stringify({
+      id: submission.id, name: submission.name, suggestions: notice.suggestions, createdAt: Date.now(),
+    }));
+    keyboard = conflictKeyboard(submission, notice.suggestions);
+  }
+  return { status: "⚠️ 待审核 · 名称冲突", detail: notice.text, keyboard };
+}
+
+// Build a fresh review card message, including conflict handling. Shared by new
+// submissions and the fallback when a card can no longer be edited in place.
+async function postReviewCard(env, settings, submission, { withKeyboard = true } = {}) {
+  const { status, detail, keyboard } = await pendingCardFields(env, submission, withKeyboard);
   return sendCard(settings, submission, status, keyboard, detail);
 }
 
@@ -663,6 +667,41 @@ async function sendCard(settings, submission, status, keyboard, detail = "") {
     });
     return { message_id: result.message_id, cardKind: "text" };
   }
+}
+
+// Replace the whole card in place. A photo card must swap its media too, since
+// editing only the caption would leave the previous icon on screen.
+async function editReviewCard(settings, message, submission, status, keyboard = { inline_keyboard: [] }, detail = "") {
+  if (!message?.message_id) return false;
+  if (cardKindOf(message) === "photo" && submission.url) {
+    try {
+      await telegramApi(settings.token, "editMessageMedia", {
+        chat_id: settings.chatId,
+        message_id: message.message_id,
+        media: {
+          type: "photo",
+          media: submission.url,
+          caption: submissionMessage(submission, status, detail, CAPTION_LIMIT),
+          parse_mode: "HTML",
+        },
+        reply_markup: keyboard,
+      });
+      return true;
+    } catch (error) {
+      if (/message is not modified/i.test(error.message)) return true;
+      return false;
+    }
+  }
+  return editCard(settings, message, submission, status, keyboard, detail);
+}
+
+// Refresh the current card message with another submission instead of stacking a
+// new one, so a reviewer keeps a single live card while working the queue.
+async function renderReviewCard(env, settings, message, submission) {
+  const { status, detail, keyboard } = await pendingCardFields(env, submission, true);
+  if (await editReviewCard(settings, message, submission, status, keyboard, detail)) return true;
+  await sendCard(settings, submission, status, keyboard, detail);
+  return false;
 }
 
 async function saveConflict(env, id, name, body) {
@@ -926,7 +965,8 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   // Reuse the result card as the next review card so reviewers can keep working
   // down the queue without scrolling back to older messages.
   if (action === "view") {
-    await postReviewCard(env, settings, row, { withKeyboard: true });
+    // Refresh the same message instead of sending a second card.
+    await renderReviewCard(env, settings, callback.message, row);
     return;
   }
   if (row.status !== "pending" && !(row.status === "approving" && action === "approve")) {

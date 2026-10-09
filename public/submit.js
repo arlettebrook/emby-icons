@@ -103,25 +103,9 @@ function makeSuggestionChips(suggestions) {
   return group;
 }
 
-function localNameSuggestions(value, count = 2) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return [];
-  const match = trimmed.match(/^(.*?)[\s._-]*(\d+)$/u);
-  let stem = trimmed;
-  let startAt = 1;
-  if (match && match[1].trim()) {
-    stem = match[1].replace(/[\s._-]+$/u, "").trim();
-    startAt = Number(match[2]) + 1;
-  }
-  const suggestions = [];
-  for (let n = Math.max(startAt, 1); n < startAt + 1000 && suggestions.length < count; n += 1) {
-    suggestions.push(`${stem}${String(n).padStart(2, "0")}`);
-  }
-  return suggestions;
-}
-
 const NAME_EXAMPLE_HINT = "名称需唯一；重名时会按你输入的名称给出建议。";
 
+// 名称可用时不显示任何建议名；只有发生重名冲突时才在冲突提示框内给出建议。
 function renderNameExample() {
   if (!nameExample) return;
   const value = nameInput ? nameInput.value.trim() : "";
@@ -129,21 +113,7 @@ function renderNameExample() {
     nameExample.replaceChildren(document.createTextNode(NAME_EXAMPLE_HINT));
     return;
   }
-  // When the name is taken, the conflict box below already offers the suggestions.
-  if (nameCheckState.exists && nameCheckState.value === value) {
-    nameExample.replaceChildren();
-    return;
-  }
-  const suggestions = nameCheckState.value === value && nameCheckState.suggestions.length
-    ? nameCheckState.suggestions
-    : localNameSuggestions(value);
-  if (!suggestions.length) {
-    nameExample.replaceChildren(document.createTextNode(NAME_EXAMPLE_HINT));
-    return;
-  }
-  const label = document.createElement("span");
-  label.textContent = "建议名称（重名时可用）：";
-  nameExample.replaceChildren(label, makeSuggestionChips(suggestions));
+  nameExample.replaceChildren();
 }
 
 function renderNameConflict(body, value) {
