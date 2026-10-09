@@ -819,6 +819,44 @@ test("the /queue command reports an empty queue", async () => {
   }
 });
 
+telegramTest("a name duplicated inside the queue is flagged with rename suggestions", async ({ env, secret }) => {
+  const first = await createSubmission(env, "test", "https://example.com/a.png");
+  const second = await createSubmission(env, "test", "https://example.com/b.png");
+
+  // The newer duplicate lands on a conflict card straight away.
+  const card = lastCardSend();
+  assert.match(cardText(card), /队列内名称重复/);
+  const buttons = card.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data);
+  assert.ok(buttons.includes(`rename:${second}:0`), "expected a one-tap rename suggestion");
+  assert.ok(buttons.includes(`rename-manual:${second}`));
+  assert.ok(buttons.includes(`reject:${second}`));
+  assert.ok(!buttons.includes(`replace:${second}`), "nothing is published to replace yet");
+  assert.ok(env.__kv.has(`settings/telegram/conflict/${second}`));
+
+  // The one-tap suggestion publishes the duplicate under a free name.
+  await callback(secret, env, `rename:${second}:0`);
+  assert.equal(env.DB.submissions.get(second).name, "test01");
+  assert.equal(env.DB.submissions.get(second).status, "approved");
+  assert.deepEqual(readKv(env).icons.map((icon) => icon.name), ["test01"]);
+  // The first submission is untouched and still waiting.
+  assert.equal(env.DB.submissions.get(first).status, "pending");
+  assert.equal(env.DB.submissions.get(first).name, "test");
+});
+
+telegramTest("the /queue listing marks names shared by pending submissions", async ({ env, secret }) => {
+  await createSubmission(env, "Dup", "https://example.com/a.png");
+  await createSubmission(env, "Dup", "https://example.com/b.png");
+  await createSubmission(env, "Solo", "https://example.com/c.png");
+
+  await message(secret, env, "/queue");
+
+  const send = mock.method("sendMessage").at(-1);
+  const marked = send.payload.text.split("\n").filter((line) => line.includes("重名"));
+  assert.equal(marked.length, 2, "both duplicate rows should be marked");
+  assert.match(send.payload.text, /Solo/);
+  assert.ok(!send.payload.text.includes("Solo</b> ⚠️"), "unique names stay unmarked");
+});
+
 telegramTest("editing and publishing rewrites the name, URL and description", async ({ env, secret }) => {
   const id = await createSubmission(env, "EditMe", "https://example.com/original.png");
 

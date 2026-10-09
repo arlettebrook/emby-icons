@@ -1,5 +1,5 @@
 import { hasAdminAccess } from "./admin.js";
-import { findIconNameConflict, readDocument, suggestIconNames, writeAuditLog } from "./icons.js";
+import { findIconNameConflict, normalizeIconName, readDocument, suggestIconNames, writeAuditLog } from "./icons.js";
 
 const SETTINGS_KEY = "settings/telegram.json";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -242,11 +242,11 @@ function submissionKeyboard(submission) {
   if (submission?.url) rows.push([{ text: "🖼 打开原图", url: submission.url }]);
   rows.push([
     { text: "✅ 通过并发布", callback_data: `approve:${submission.id}` },
-    { text: "❌ 拒绝…", callback_data: `reject:${submission.id}` },
+    { text: "❌ 拒绝", callback_data: `reject:${submission.id}` },
   ]);
   rows.push([
-    { text: "✏️ 改名并通过…", callback_data: `rename-manual:${submission.id}` },
-    { text: "📝 编辑并发布…", callback_data: `edit:${submission.id}` },
+    { text: "✏️ 改名并通过", callback_data: `rename-manual:${submission.id}` },
+    { text: "📝 编辑并发布", callback_data: `edit:${submission.id}` },
   ]);
   return { inline_keyboard: rows };
 }
@@ -255,7 +255,7 @@ function conflictStateKey(id) {
   return `settings/telegram/conflict/${id}`;
 }
 
-function conflictKeyboard(submission, suggestions) {
+function conflictKeyboard(submission, suggestions, { replace = true } = {}) {
   const id = submission.id;
   const list = (Array.isArray(suggestions) ? suggestions : []).filter((name) => typeof name === "string" && name.trim());
   const rows = [];
@@ -263,11 +263,12 @@ function conflictKeyboard(submission, suggestions) {
   // Offer a single one-tap suggestion plus a manual rename so reviewers can
   // type any name instead of being limited to generated suggestions.
   if (list[0]) rows.push([{ text: `✏️ 用建议名通过：${truncate(list[0], 32)}`, callback_data: `rename:${id}:0` }]);
-  rows.push([{ text: "✏️ 改名并通过…", callback_data: `rename-manual:${id}` }]);
-  rows.push([
-    { text: "♻️ 替换现有…", callback_data: `replace:${id}` },
-    { text: "❌ 拒绝…", callback_data: `reject:${id}` },
-  ]);
+  rows.push([{ text: "✏️ 改名并通过", callback_data: `rename-manual:${id}` }]);
+  // "Replace" only fits a name already published in the icon library; a clash
+  // that only exists inside the queue just needs a rename or a rejection.
+  rows.push(replace
+    ? [{ text: "♻️ 替换现有", callback_data: `replace:${id}` }, { text: "❌ 拒绝", callback_data: `reject:${id}` }]
+    : [{ text: "❌ 拒绝", callback_data: `reject:${id}` }]);
   return { inline_keyboard: rows };
 }
 
@@ -276,7 +277,10 @@ function conflictNotice(name, body) {
     ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
     : [];
   const existing = typeof body?.conflict?.name === "string" ? body.conflict.name : "";
-  const lines = [`⚠️ 名称冲突：图标名「${name}」已存在${existing && existing !== name ? `（现有：${existing}）` : ""}。`];
+  const headline = body?.pending
+    ? `⚠️ 队列内名称重复：待审核列表里已有一条同名「${name}」的提交。`
+    : `⚠️ 名称冲突：图标名「${name}」已存在${existing && existing !== name ? `（现有：${existing}）` : ""}。`;
+  const lines = [headline];
   if (suggestions.length) lines.push(`建议改名：${suggestions.join("、")}`);
   lines.push("请选择处理方式：");
   return { text: lines.join("\n"), suggestions };
@@ -329,9 +333,17 @@ function waitLabel(createdAt) {
 
 function queueMessage(rows) {
   if (!rows.length) return "📋 <b>待审核队列</b>\n\n🎉 当前没有待审核的提交。";
+  // Flag names claimed by more than one pending submission so the reviewer can
+  // spot duplicates straight from the queue listing.
+  const counts = new Map();
+  rows.forEach((row) => {
+    const key = normalizeIconName(row.name);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
   const lines = [`📋 <b>待审核队列</b>（${rows.length} 条）`];
   rows.forEach((row, index) => {
-    lines.push(`${index + 1}. <b>${htmlTruncate(row.name, 80)}</b> · 等待 ${waitLabel(row.created_at)}`);
+    const duplicated = counts.get(normalizeIconName(row.name)) > 1;
+    lines.push(`${index + 1}. <b>${htmlTruncate(row.name, 80)}</b>${duplicated ? " ⚠️ 重名" : ""} · 等待 ${waitLabel(row.created_at)}`);
     lines.push(`<code>${htmlTruncate(row.id, 40)}</code>`);
   });
   return lines.join("\n");
@@ -416,7 +428,20 @@ async function readSuggestedName(env, id, index) {
   return typeof suggestions[index] === "string" ? suggestions[index] : "";
 }
 
-async function findSubmissionConflict(env, name, strict = false) {
+// Other pending submissions that already claim this name, so a duplicate inside
+// the review queue is caught before either copy reaches the icon library.
+async function pendingNamePeers(env, excludeId, name) {
+  const key = normalizeIconName(name);
+  if (!env.DB || !key) return [];
+  try {
+    const rows = await listPendingSubmissions(env);
+    return rows.filter((row) => row && row.id !== excludeId && normalizeIconName(row.name) === key);
+  } catch {
+    return [];
+  }
+}
+
+async function findSubmissionConflict(env, name, { strict = false, excludeId = "", includePending = false } = {}) {
   if (!env.EMBY_ICONS) {
     if (strict) throw new Error("无法读取已发布图标，暂不能确认替换");
     return null;
@@ -424,12 +449,20 @@ async function findSubmissionConflict(env, name, strict = false) {
   if (!name) return null;
   try {
     const current = await readDocument(env);
-    if (current.text === null) return null;
-    const document = JSON.parse(current.text);
+    const document = current.text === null ? { icons: [] } : JSON.parse(current.text);
     if (!Array.isArray(document?.icons)) throw new Error("已发布图标数据格式无效");
-    const conflict = findIconNameConflict(document.icons, name);
-    if (!conflict) return null;
-    return { conflict, suggestions: suggestIconNames(name, document.icons, 2) };
+    const published = findIconNameConflict(document.icons, name);
+    if (published) {
+      return { conflict: published, suggestions: suggestIconNames(name, document.icons, 2), pending: false };
+    }
+    if (!includePending) return null;
+    const peers = await pendingNamePeers(env, excludeId, name);
+    if (!peers.length) return null;
+    return {
+      conflict: { name: peers[0].name, url: peers[0].url },
+      suggestions: suggestIconNames(name, [...document.icons, ...peers], 2),
+      pending: true,
+    };
   } catch (error) {
     if (strict) throw error;
     return null;
@@ -545,19 +578,23 @@ export async function notifyNewSubmission(env, submission, origin = "") {
 // Conflict-aware fields for a pending submission's card. Persists the suggestion
 // list so the one-tap rename buttons keep working after any refresh.
 async function pendingCardFields(env, submission, withKeyboard) {
-  const existing = await findSubmissionConflict(env, submission.name);
+  const existing = await findSubmissionConflict(env, submission.name, { includePending: true, excludeId: submission.id });
   if (!existing) {
     return { status: "🕓 待审核", detail: "", keyboard: withKeyboard ? submissionKeyboard(submission) : null };
   }
-  const notice = conflictNotice(submission.name, { conflict: existing.conflict, suggestions: existing.suggestions });
+  const notice = conflictNotice(submission.name, existing);
   let keyboard = withKeyboard ? submissionKeyboard(submission) : null;
   if (withKeyboard && env.EMBY_ICONS) {
     await env.EMBY_ICONS.put(conflictStateKey(submission.id), JSON.stringify({
       id: submission.id, name: submission.name, suggestions: notice.suggestions, createdAt: Date.now(),
     }));
-    keyboard = conflictKeyboard(submission, notice.suggestions);
+    keyboard = conflictKeyboard(submission, notice.suggestions, { replace: !existing.pending });
   }
-  return { status: "⚠️ 待审核 · 名称冲突", detail: notice.text, keyboard };
+  return {
+    status: existing.pending ? "⚠️ 待审核 · 队列内名称重复" : "⚠️ 待审核 · 名称冲突",
+    detail: notice.text,
+    keyboard,
+  };
 }
 
 // Build a fresh review card message, including conflict handling. Shared by new
@@ -727,10 +764,11 @@ async function refreshCard(env, settings, message, submission, detail = "") {
       : { inline_keyboard: [] };
     return editCard(settings, message, submission, resolvedStatus(submission), keyboard, detail);
   }
-  const conflict = await findSubmissionConflict(env, submission.name);
+  const conflict = await findSubmissionConflict(env, submission.name, { includePending: true, excludeId: submission.id });
   if (conflict) {
     const notice = await saveConflict(env, submission.id, submission.name, conflict);
-    return editCard(settings, message, submission, "⚠️ 待审核 · 名称冲突", conflictKeyboard(submission, notice.suggestions), [detail, notice.text].filter(Boolean).join("\n"));
+    const status = conflict.pending ? "⚠️ 待审核 · 队列内名称重复" : "⚠️ 待审核 · 名称冲突";
+    return editCard(settings, message, submission, status, conflictKeyboard(submission, notice.suggestions, { replace: !conflict.pending }), [detail, notice.text].filter(Boolean).join("\n"));
   }
   await env.EMBY_ICONS.delete(conflictStateKey(submission.id)).catch(() => {});
   return editCard(settings, message, submission, "🕓 待审核", submissionKeyboard(submission), detail);
@@ -865,7 +903,7 @@ async function beginInput(env, settings, key, previous, message, row, action, re
   if (action === "replace") {
     let conflict;
     try {
-      conflict = await findSubmissionConflict(env, row.name, true);
+      conflict = await findSubmissionConflict(env, row.name, { strict: true });
     } catch {
       await refreshCard(env, settings, message, row, "无法确认现有图标状态，替换操作尚未开始。");
       await sendTelegramMessage(settings.token, settings.chatId, "无法读取当前图标库，已恢复审核卡片，请稍后重试替换。");
@@ -992,7 +1030,7 @@ async function handleCallbackUpdate(request, env, settings, callback) {
       return;
     }
     if (action === "replace-confirm") {
-      const current = await findSubmissionConflict(env, row.name, true);
+      const current = await findSubmissionConflict(env, row.name, { strict: true });
       const conflict = current ? { name: current.conflict.name, url: current.conflict.url } : null;
       if (JSON.stringify(conflict) !== JSON.stringify(state.conflict)) {
         await beginInput(env, settings, key, state, callback.message, row, "replace", callback.from);
