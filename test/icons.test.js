@@ -210,10 +210,10 @@ test("findIconNameConflict and findDuplicateIcon use the shared normalization", 
 });
 
 test("suggestIconNames appends two-digit suffixes and skips taken names", () => {
-  assert.deepEqual(suggestIconNames("OkEmby", []), ["OkEmby02", "OkEmby03"]);
-  assert.deepEqual(suggestIconNames("OkEmby", ["OkEmby02"]), ["OkEmby03", "OkEmby04"]);
+  assert.deepEqual(suggestIconNames("OkEmby", []), ["OkEmby01", "OkEmby02"]);
+  assert.deepEqual(suggestIconNames("OkEmby", ["OkEmby02"]), ["OkEmby01", "OkEmby03"]);
   assert.deepEqual(suggestIconNames("OkEmby02", []), ["OkEmby03", "OkEmby04"]);
-  assert.deepEqual(suggestIconNames("OkEmby", [{ name: "okemby02" }, { name: "OKEMBY03" }], 2), ["OkEmby04", "OkEmby05"]);
+  assert.deepEqual(suggestIconNames("OkEmby", [{ name: "okemby02" }, { name: "OKEMBY03" }], 2), ["OkEmby01", "OkEmby04"]);
   assert.deepEqual(suggestIconNames("", []), []);
 });
 
@@ -250,7 +250,7 @@ test("public name check reports conflicts with suggestions", async () => {
   const conflicting = await conflict.json();
   assert.equal(conflicting.exists, true);
   assert.equal(conflicting.conflict.name, "OkEmby");
-  assert.deepEqual(conflicting.suggestions, ["OkEmby02", "OkEmby03"]);
+  assert.deepEqual(conflicting.suggestions, ["OkEmby01", "OkEmby02"]);
 
   const free = await handleNameCheck(new Request("https://example.com/api/name-check?name=OkEmby02"), env);
   const freeBody = await free.json();

@@ -47,7 +47,7 @@ export function findDuplicateIcon(icons) {
 }
 
 /**
- * Produce candidate names such as "OkEmby02", "OkEmby03" for "OkEmby".
+ * Produce candidate names such as "OkEmby01", "OkEmby02" for "OkEmby".
  * A trailing numeric suffix is treated as a counter so "OkEmby02" would
  * suggest "OkEmby03", "OkEmby04", ... instead of "OkEmby0202".
  */
@@ -63,14 +63,14 @@ export function suggestIconNames(name, taken, count = 2) {
 
   const match = trimmed.match(/^(.*?)[\s._-]*(\d+)$/u);
   let stem = trimmed;
-  let startAt = 2;
+  let startAt = 1;
   if (match && match[1].trim()) {
     stem = match[1].replace(/[\s._-]+$/u, "").trim();
     startAt = Number(match[2]) + 1;
   }
 
   const suggestions = [];
-  const start = Math.max(startAt, 2);
+  const start = Math.max(startAt, 1);
   for (let n = start; n < start + 1000 && suggestions.length < count; n += 1) {
     const candidate = `${stem}${String(n).padStart(2, "0")}`;
     if (!takenKeys.has(normalizeIconName(candidate))) suggestions.push(candidate);

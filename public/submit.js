@@ -108,13 +108,13 @@ function localNameSuggestions(value, count = 2) {
   if (!trimmed) return [];
   const match = trimmed.match(/^(.*?)[\s._-]*(\d+)$/u);
   let stem = trimmed;
-  let startAt = 2;
+  let startAt = 1;
   if (match && match[1].trim()) {
     stem = match[1].replace(/[\s._-]+$/u, "").trim();
     startAt = Number(match[2]) + 1;
   }
   const suggestions = [];
-  for (let n = Math.max(startAt, 2); n < startAt + 1000 && suggestions.length < count; n += 1) {
+  for (let n = Math.max(startAt, 1); n < startAt + 1000 && suggestions.length < count; n += 1) {
     suggestions.push(`${stem}${String(n).padStart(2, "0")}`);
   }
   return suggestions;

@@ -386,24 +386,34 @@ function callbackToast(action) {
   }
 }
 
-function manualRenamePromptText(name, suggestion) {
+function manualRenamePromptText(name, suggestions, isPrivate = true) {
+  const list = (Array.isArray(suggestions) ? suggestions : [suggestions])
+    .filter((item) => typeof item === "string" && item.trim() && item.trim() !== name);
   return [
-    "✏️ 请直接回复新的图标名称，发送后将改名并通过审核。",
+    "✏️ 请回复新的图标名称，发送后将改名并通过审核。",
+    isPrivate ? "直接发送即可（无需引用消息）。" : "请回复本条审核消息。",
     `当前名称：${name}`,
-    suggestion && suggestion !== name ? `冲突可用：${suggestion}` : "",
+    list.length ? `建议名称（可直接回复其中一个）：${list.join("、")}` : "",
     "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
   ].filter(Boolean).join("\n");
 }
 
-async function readSuggestedName(env, id, index) {
+async function readSuggestedNames(env, id) {
   const raw = await env.EMBY_ICONS.get(conflictStateKey(id));
-  if (!raw) return "";
+  if (!raw) return [];
   try {
     const suggestions = JSON.parse(raw)?.suggestions;
-    return Array.isArray(suggestions) && typeof suggestions[index] === "string" ? suggestions[index] : "";
+    return Array.isArray(suggestions)
+      ? suggestions.filter((item) => typeof item === "string" && item.trim())
+      : [];
   } catch {
-    return "";
+    return [];
   }
+}
+
+async function readSuggestedName(env, id, index) {
+  const suggestions = await readSuggestedNames(env, id);
+  return typeof suggestions[index] === "string" ? suggestions[index] : "";
 }
 
 async function findSubmissionConflict(env, name, strict = false) {
@@ -758,45 +768,45 @@ function inputKeyboard(state) {
   return { inline_keyboard: rows };
 }
 
-async function sendInputPrompt(env, settings, key, state, row, detail = "") {
-  const suggestion = state.action === "rename" ? await readSuggestedName(env, row.id, 0) : "";
-  const text = state.action === "rename"
-    ? manualRenamePromptText(row.name, suggestion)
-    : state.action === "edit"
-      ? [
-        `📝 请回复「${row.name}」的修改内容，每个字段一行：`,
-        "名称：新名称",
-        "URL：https://example.com/icon.png",
-        "说明：可选（不写则保持原说明）",
-        "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
-      ].join("\n")
-      : [
-        `📝 请直接回复「${row.name}」的拒绝原因。`,
-        "也可点击卡片上的常用原因；不填原因可发送 /reject 或 /skip。",
-        "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
-      ].join("\n");
-  const prompt = await telegramApi(settings.token, "sendMessage", {
-    chat_id: settings.chatId,
-    text: [`${state.userName}，`, detail, text, `编号：${row.id}`].filter(Boolean).join("\n"),
-    entities: [{
-      type: "text_mention", offset: 0, length: state.userName.length,
-      user: { id: Number(state.userId), is_bot: false, first_name: state.userName },
-    }],
-    disable_web_page_preview: true,
-    reply_markup: {
-      force_reply: true,
-      selective: true,
-      input_field_placeholder: state.action === "rename"
-        ? "新名称（发送后通过审核）"
-        : state.action === "edit" ? "名称/URL/说明（多行）" : "输入拒绝原因",
-    },
-  });
-  const oldPrompt = state.promptMessageId;
-  state.promptMessageId = prompt.message_id;
-  await saveReviewState(env, key, state);
-  if (oldPrompt && oldPrompt !== state.promptMessageId) {
-    await retirePrompt(settings, { ...state, promptMessageId: oldPrompt }, "请回复最新的输入提示。");
+// The input hint is folded into the review card itself, so reviewers only need
+// to type their reply. Nothing forces a quote/reply to a separate message.
+async function inputHintText(env, state, row) {
+  const isPrivate = state.chatType === "private";
+  if (state.action === "rename") {
+    return manualRenamePromptText(row.name, await readSuggestedNames(env, row.id), isPrivate);
   }
+  if (state.action === "edit") {
+    return [
+      `📝 请回复「${row.name}」的修改内容，每个字段一行：`,
+      isPrivate ? "直接发送即可（无需引用消息）。" : "请回复本条审核消息。",
+      "名称：新名称",
+      "URL：https://example.com/icon.png",
+      "说明：可选（不写则保持原说明）",
+      "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
+    ].join("\n");
+  }
+  return [
+    `📝 请回复「${row.name}」的拒绝原因。`,
+    isPrivate ? "直接发送即可（无需引用消息）。" : "请回复本条审核消息。",
+    "也可点击卡片上的常用原因；不填原因可发送 /reject 或 /skip。",
+    "10 分钟内有效 · 发送 /cancel 或点击卡片上的取消按钮",
+  ].join("\n");
+}
+
+function inputStatus(action) {
+  if (action === "rename") return "⏳ 等待新名称 · 直接回复新名称即可";
+  if (action === "edit") return "📝 等待编辑内容 · 直接回复修改内容";
+  if (action === "reject") return "⏳ 等待拒绝原因 · 直接回复原因或点击常用原因";
+  return "";
+}
+
+// Re-render the live review card (never a separate message) so an invalid reply
+// can be retried in place.
+async function refreshInputCard(env, settings, key, state, row, detail = "") {
+  const hint = await inputHintText(env, state, row);
+  const combined = [detail, hint].filter(Boolean).join("\n\n");
+  await saveReviewState(env, key, state);
+  return editCard(settings, stateMessage(settings, state), row, inputStatus(state.action), inputKeyboard(state), combined);
 }
 
 async function beginInput(env, settings, key, previous, message, row, action, reviewer) {
@@ -808,6 +818,7 @@ async function beginInput(env, settings, key, previous, message, row, action, re
   }
   const state = {
     id: row.id, action, messageId: message.message_id, cardKind: cardKindOf(message),
+    chatType: message.chat?.type || "private",
     userId: String(reviewer.id), userName: truncate(reviewer.first_name || "审核人", 40),
     nonce: createSecret().slice(0, 8), createdAt: Date.now(),
   };
@@ -827,27 +838,15 @@ async function beginInput(env, settings, key, previous, message, row, action, re
       : "当前已无同名图标，确认后将直接发布。";
   } else if (action === "approve") {
     status = "🛡️ 确认通过并发布？\n点击下方按钮后立即上线，避免误触；10 分钟内有效。";
-  } else if (action === "edit") {
-    status = "📝 等待编辑内容 · 回复下方提示后按修改后的信息直接发布";
   } else {
-    status = action === "rename"
-      ? "⏳ 等待新名称 · 回复下方提示后将改名并通过"
-      : "⏳ 等待拒绝原因 · 点击常用原因即拒绝，或回复下方提示自定义";
+    status = inputStatus(action);
   }
   await saveReviewState(env, key, state);
-  const edited = await editCard(settings, message, row, status, inputKeyboard(state));
+  const hint = action === "replace" || action === "approve" ? "" : await inputHintText(env, state, row);
+  const edited = await editCard(settings, message, row, status, inputKeyboard(state), hint);
   if (!edited) {
     await clearState(env, settings, key, state);
     await sendTelegramMessage(settings.token, settings.chatId, "审核卡片更新失败，尚未提交操作，请重新点击原按钮。");
-    return;
-  }
-  if (action !== "replace" && action !== "approve") {
-    try {
-      await sendInputPrompt(env, settings, key, state, row);
-    } catch {
-      await clearState(env, settings, key, state);
-      await refreshCard(env, settings, message, row, "输入提示发送失败，请重新操作。");
-    }
   }
 }
 
@@ -882,8 +881,9 @@ async function finishDecision(request, env, settings, key, state, message, row, 
     const keyboard = conflictKeyboard(latest || row, notice.suggestions);
     if (state?.id === row.id && ["rename", "edit"].includes(state.action)) {
       keyboard.inline_keyboard.push([cancelButton(state)]);
-      await editCard(settings, message, latest || row, "⚠️ 名称冲突 · 可继续输入新名称", keyboard, notice.text);
-      await sendInputPrompt(env, settings, key, state, latest || row, notice.text);
+      const hint = await inputHintText(env, state, latest || row);
+      const detail = [notice.text, hint].filter(Boolean).join("\n\n");
+      await editCard(settings, message, latest || row, "⚠️ 名称冲突 · 可继续输入新名称", keyboard, detail);
     } else {
       await editCard(settings, message, latest || row, "⚠️ 名称冲突", keyboard, notice.text);
     }
@@ -891,7 +891,7 @@ async function finishDecision(request, env, settings, key, state, message, row, 
   }
   const errorText = `审核未完成：${truncate(body.error || "处理失败，请重试", 240)}`;
   if (state?.id === row.id && ["rename", "reject", "edit"].includes(state.action)) {
-    await sendInputPrompt(env, settings, key, state, latest || row, errorText);
+    await refreshInputCard(env, settings, key, state, latest || row, errorText);
   } else {
     if (latest) await refreshCard(env, settings, message, latest, errorText);
     await sendTelegramMessage(settings.token, settings.chatId, errorText);
@@ -1054,9 +1054,12 @@ async function handleMessageUpdate(env, settings, message) {
   }
   const replyId = message.reply_to_message?.message_id;
   const isPrivate = message.chat.type === "private";
-  // Private chats retain free-text input. Groups must reply to the exact prompt,
-  // preventing unrelated chatter or an old reply from reviewing another item.
-  if ((replyId && replyId !== state.promptMessageId) || (!isPrivate && !replyId)) return;
+  // Private chats accept plain text (no quoting needed). Groups still anchor to
+  // the live review card so unrelated chatter is never captured as a decision.
+  // Replies to an old or unrelated message are always ignored.
+  const anchorId = state.promptMessageId ?? state.messageId;
+  if (replyId != null && replyId !== anchorId) return;
+  if (!isPrivate && replyId == null) return;
   if (command?.[1].toLowerCase() === "cancel") {
     await clearState(env, settings, key, state);
     await refreshCard(env, settings, stateMessage(settings, state), row,
@@ -1072,7 +1075,7 @@ async function handleMessageUpdate(env, settings, message) {
     return;
   }
   if (!text) {
-    await sendInputPrompt(env, settings, key, state, row, "请发送文字内容，不支持图片、贴纸或附件。");
+    await refreshInputCard(env, settings, key, state, row, "请发送文字内容，不支持图片、贴纸或附件。");
     return;
   }
   if (state.action === "edit") {
@@ -1081,15 +1084,15 @@ async function handleMessageUpdate(env, settings, message) {
     const url = String(fields.url || "").trim();
     const description = String(fields.description || "").trim();
     if (!name || name.length > 120) {
-      await sendInputPrompt(env, settings, key, state, row, "名称需为 1-120 个字符，请按“名称：/URL：/说明：”重新回复。");
+      await refreshInputCard(env, settings, key, state, row, "名称需为 1-120 个字符，请按“名称：/URL：/说明：”重新回复。");
       return;
     }
     if (!url || url.length > 2048) {
-      await sendInputPrompt(env, settings, key, state, row, "URL 必填且不超过 2048 个字符，请按格式重新回复。");
+      await refreshInputCard(env, settings, key, state, row, "URL 必填且不超过 2048 个字符，请按格式重新回复。");
       return;
     }
     if (description.length > 1000) {
-      await sendInputPrompt(env, settings, key, state, row, "说明不能超过 1000 个字符，请重新回复。");
+      await refreshInputCard(env, settings, key, state, row, "说明不能超过 1000 个字符，请重新回复。");
       return;
     }
     await finishDecision(new Request("https://telegram-webhook.invalid"), env, settings, key, state,
@@ -1099,13 +1102,13 @@ async function handleMessageUpdate(env, settings, message) {
   }
   const isRejectCommand = state.action === "reject" && ["reject", "skip"].includes(command?.[1].toLowerCase());
   if (text.startsWith("/") && !isRejectCommand) {
-    await sendInputPrompt(env, settings, key, state, row, "请回复所需文字，或发送 /cancel 取消。");
+    await refreshInputCard(env, settings, key, state, row, "请回复所需文字，或发送 /cancel 取消。");
     return;
   }
   const value = isRejectCommand ? (command[2] || "").trim() : text;
   const limit = state.action === "rename" ? 120 : 1000;
   if (value.length > limit || (state.action === "rename" && !value)) {
-    await sendInputPrompt(env, settings, key, state, row,
+    await refreshInputCard(env, settings, key, state, row,
       state.action === "rename" ? "图标名称需为 1-120 个字符，请重新回复。" : "拒绝原因不能超过 1000 个字符，请重新回复。");
     return;
   }

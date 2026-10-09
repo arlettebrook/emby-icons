@@ -188,12 +188,12 @@ test("renaming via Telegram publishes under the suggested name", async () => {
     assert.equal(response.status, 200);
 
     const icons = readKv(env).icons;
-    assert.deepEqual(icons.map((icon) => icon.name), ["OkEmby", "OkEmby02"]);
+    assert.deepEqual(icons.map((icon) => icon.name), ["OkEmby", "OkEmby01"]);
     assert.equal(env.DB.submissions.get(id).status, "approved");
-    assert.equal(env.DB.submissions.get(id).name, "OkEmby02");
+    assert.equal(env.DB.submissions.get(id).name, "OkEmby01");
     const answer = mock.method("answerCallbackQuery").at(-1);
     assert.match(answer.payload.text, /正在改名并发布/);
-    assert.match(lastReviewEdit().payload.text, /已改名为「OkEmby02」/);
+    assert.match(lastReviewEdit().payload.text, /已改名为「OkEmby01」/);
   } finally {
     mock.restore();
   }
@@ -233,13 +233,12 @@ test("manual rename prompt uses the submission name instead of a fixed example",
 
     await callback(secret, env, `rename-manual:${id}`);
 
-    const prompt = mock.method("sendMessage").at(-1).payload.text;
-    assert.match(prompt, /请直接回复新的图标名称/);
-    assert.match(prompt, /当前名称：MyEmbyIcon/);
-    assert.match(prompt, /\/cancel/);
-    assert.doesNotMatch(prompt, /OkEmby02/);
-
+    // The hint is folded into the card itself; no separate prompt is sent.
     const edit = lastReviewEdit();
+    assert.match(edit.payload.text, /请回复新的图标名称/);
+    assert.match(edit.payload.text, /当前名称：MyEmbyIcon/);
+    assert.match(edit.payload.text, /\/cancel/);
+    assert.doesNotMatch(edit.payload.text, /OkEmby02/);
     assert.match(edit.payload.text, /等待新名称/);
     assert.doesNotMatch(edit.payload.text, /例如 OkEmby02/);
   } finally {
@@ -257,9 +256,9 @@ test("manual rename prompt offers the conflict suggestion derived from that subm
 
     await callback(secret, env, `rename-manual:${id}`);
 
-    const prompt = mock.method("sendMessage").at(-1).payload.text;
-    assert.match(prompt, /当前名称：OkEmby/);
-    assert.match(prompt, /冲突可用：OkEmby\d{2}/);
+    const text = lastReviewEdit().payload.text;
+    assert.match(text, /当前名称：OkEmby/);
+    assert.match(text, /建议名称（可直接回复其中一个）：OkEmby01、OkEmby02/);
   } finally {
     mock.restore();
   }
@@ -435,10 +434,9 @@ function telegramTest(name, run, options = {}) {
 telegramTest("reject menu offers common reasons and a scoped cancel button", async ({ env, secret }) => {
   const id = await createSubmission(env, "QuickReject", "https://example.com/reject.png");
   await callback(secret, env, `reject:${id}`);
-  const prompt = mock.method("sendMessage").at(-1).payload;
-  assert.equal(prompt.reply_markup.force_reply, true);
-  assert.equal(prompt.reply_markup.selective, true);
-  assert.equal(prompt.entities[0].user.id, Number(USER_ID));
+  // The rejection hint lives on the card; nothing forces a reply/quote.
+  assert.match(lastReviewEdit().payload.text, /请回复「QuickReject」的拒绝原因/);
+  assert.match(lastReviewEdit().payload.text, /无需引用消息/);
   assert.ok(buttonData("cancel"));
   assert.equal(env.DB.submissions.get(id).status, "pending");
   const preset = buttonData("reject-preset");
@@ -451,16 +449,15 @@ telegramTest("reject menu offers common reasons and a scoped cancel button", asy
   assert.equal(readKv(env).icons.length, 0);
 });
 
-telegramTest("finishing a reject removes the one-off input prompt but keeps the card", async ({ env, secret }) => {
+telegramTest("a rejection reuses the card in place instead of sending a second prompt", async ({ env, secret }) => {
   const id = await createSubmission(env, "CleanPrompt", "https://example.com/clean.png");
   await callback(secret, env, `reject:${id}`);
-  const promptId = pendingState(env).promptMessageId;
-  assert.ok(promptId, "expected a reply prompt");
-  await message(secret, env, "/reject", 12, { replyTo: promptId });
+  assert.equal(pendingState(env).promptMessageId, undefined, "no separate prompt message");
+  const sentBefore = mock.method("sendMessage").length;
+  await message(secret, env, "/reject", 12);
   assert.equal(env.DB.submissions.get(id).status, "rejected");
-  const deletedIds = mock.method("deleteMessage").map((call) => call.payload.message_id);
-  assert.ok(deletedIds.includes(promptId), "the input prompt should be removed");
-  assert.ok(!deletedIds.includes(10), "the review card must not be deleted");
+  // Nothing extra is posted; only the review card is edited in place.
+  assert.equal(mock.method("sendMessage").length, sentBefore);
   assert.equal(pendingState(env), null);
 });
 
@@ -523,10 +520,10 @@ telegramTest("group chatter, another reviewer and stale replies cannot become re
   const state = pendingState(env, USER_ID, chatId);
   const options = { chatId, chatType: "supergroup" };
   await message(secret, env, "今天讨论的事情", 20, options);
-  await message(secret, env, "其他人的消息", 21, { ...options, userId: "1002", replyTo: state.promptMessageId });
-  await message(secret, env, "旧回复", 22, { ...options, replyTo: state.promptMessageId - 1 });
+  await message(secret, env, "其他人的消息", 21, { ...options, userId: "1002", replyTo: state.messageId });
+  await message(secret, env, "旧回复", 22, { ...options, replyTo: state.messageId - 1 });
   assert.equal(env.DB.submissions.get(id).status, "pending");
-  await message(secret, env, "确实无法访问", 23, { ...options, replyTo: state.promptMessageId });
+  await message(secret, env, "确实无法访问", 23, { ...options, replyTo: state.messageId });
   assert.equal(env.DB.submissions.get(id).reviewer_note, "确实无法访问");
 }, { chatId: "-100123" });
 
@@ -554,19 +551,19 @@ telegramTest("different reviewers keep independent input sessions", async ({ env
   assert.equal(env.DB.submissions.get(b).reviewer_note, "重复图标");
 });
 
-telegramTest("switching submissions restores the old card and ignores replies to its prompt", async ({ env, secret }) => {
+telegramTest("switching submissions restores the old card and ignores replies to its old card", async ({ env, secret }) => {
   const a = await createSubmission(env, "OldFlow", "https://example.com/a.png");
   const b = await createSubmission(env, "NewFlow", "https://example.com/b.png");
   await callback(secret, env, `rename-manual:${a}`);
-  const oldPrompt = pendingState(env).promptMessageId;
+  const oldCard = pendingState(env).messageId;
   await callback(secret, env, `reject:${b}`, "b", { messageId: 20 });
   assert.equal(pendingState(env).id, b);
   assert.match(lastReviewEdit(10).payload.text, /已切换/);
   assert.ok(buttonData("approve", 10));
-  await message(secret, env, "不应成为拒绝原因", 21, { replyTo: oldPrompt });
+  await message(secret, env, "不应成为拒绝原因", 21, { replyTo: oldCard });
   assert.equal(env.DB.submissions.get(a).status, "pending");
   assert.equal(env.DB.submissions.get(b).status, "pending");
-  await message(secret, env, "正确拒绝原因", 22, { replyTo: pendingState(env).promptMessageId });
+  await message(secret, env, "正确拒绝原因", 22, { replyTo: pendingState(env).messageId });
   assert.equal(env.DB.submissions.get(b).reviewer_note, "正确拒绝原因");
 });
 
@@ -682,15 +679,14 @@ telegramTest("long content fits message limits and callback data stays under 64 
   assert.equal(row.reviewer_note.length, 1000);
 });
 
-telegramTest("invalid names keep the flow open and send a fresh targeted reply prompt", async ({ env, secret }) => {
+telegramTest("invalid names keep the flow open and re-prompt on the card", async ({ env, secret }) => {
   const id = await createSubmission(env, "Validation", "https://example.com/validation.png");
   await callback(secret, env, `rename-manual:${id}`);
-  const previous = pendingState(env).promptMessageId;
   await message(secret, env, "a".repeat(121));
-  const current = pendingState(env).promptMessageId;
-  assert.notEqual(current, previous);
-  assert.match(mock.method("sendMessage").at(-1).payload.text, /1-120/);
-  await message(secret, env, "ValidName", 22, { replyTo: current });
+  assert.ok(pendingState(env), "the input session should stay open");
+  assert.match(lastReviewEdit().payload.text, /1-120/);
+  // Plain text (no reply/quote) still completes the rename.
+  await message(secret, env, "ValidName", 22);
   assert.equal(env.DB.submissions.get(id).name, "ValidName");
 });
 
@@ -730,14 +726,13 @@ telegramTest("completed decisions fall back to a result message when the card ca
   return (method) => (method === "editMessageText" && ++edits > 1) ? "Bad Request: message to edit not found" : "";
 })() } });
 
-telegramTest("a failed prompt send restores the card without leaving an invisible input session", async ({ env, secret }) => {
+telegramTest("a failed card edit leaves no invisible input session", async ({ env, secret }) => {
   const id = await createSubmission(env, "PromptFailure", "https://example.com/prompt.png");
   await callback(secret, env, `rename-manual:${id}`);
   assert.equal(pendingState(env), null);
   assert.equal(env.DB.submissions.get(id).status, "pending");
-  assert.match(lastReviewEdit().payload.text, /输入提示发送失败/);
-  assert.ok(buttonData("approve"));
-}, { mock: { fail: (method) => method === "sendMessage" ? "Telegram unavailable" : "" } });
+  assert.match(mock.method("sendMessage").at(-1).payload.text, /审核卡片更新失败/);
+}, { mock: { fail: (method) => (method === "editMessageText" || method === "editMessageCaption") ? "Telegram unavailable" : "" } });
 
 telegramTest("disabling Telegram makes an old authenticated webhook inert", async ({ env, secret }) => {
   const id = await createSubmission(env, "Disabled", "https://example.com/disabled.png");
@@ -829,9 +824,7 @@ telegramTest("editing and publishing rewrites the name, URL and description", as
 
   await callback(secret, env, `edit:${id}`);
   assert.equal(pendingState(env).action, "edit");
-  const prompt = mock.method("sendMessage").at(-1).payload;
-  assert.match(prompt.text, /修改内容/);
-  assert.equal(prompt.reply_markup.input_field_placeholder, "名称/URL/说明（多行）");
+  assert.match(lastReviewEdit().payload.text, /修改内容/);
 
   await message(secret, env, "名称：Edited\nURL：https://example.com/edited.png\n说明：新的说明");
 

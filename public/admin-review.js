@@ -146,7 +146,7 @@ function makeItem(item) {
     reject.textContent = "拒绝";
 
     rename.addEventListener("click", async () => {
-      const suggested = item.suggestions?.[0] || `${item.name}02`;
+      const suggested = item.suggestions?.[0] || `${item.name}01`;
       const nextName = window.prompt("请输入新的图标名称", suggested);
       if (nextName === null) return;
       const trimmedName = nextName.trim();
@@ -180,7 +180,7 @@ function makeItem(item) {
     reject.textContent = "拒绝";
     approve.addEventListener("click", () => decide(item.id, "approve", actions));
     rename.addEventListener("click", async () => {
-      const suggested = item.suggestions?.[0] || `${item.name}02`;
+      const suggested = item.suggestions?.[0] || `${item.name}01`;
       const nextName = window.prompt("请输入新的图标名称", suggested);
       if (nextName === null) return;
       const trimmedName = nextName.trim();

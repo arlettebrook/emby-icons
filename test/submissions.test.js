@@ -85,7 +85,7 @@ test("admin list pre-checks pending submissions against the published document",
   assert.equal(item.id, id);
   assert.equal(item.conflict.name, "OkEmby");
   assert.equal(item.conflict.index, 0);
-  assert.deepEqual(item.suggestions, ["okemby02", "okemby03"]);
+  assert.deepEqual(item.suggestions, ["okemby01", "okemby02"]);
 });
 
 test("approving a conflicting name returns a structured ICON_NAME_CONFLICT", async () => {
@@ -97,7 +97,7 @@ test("approving a conflicting name returns a structured ICON_NAME_CONFLICT", asy
   const body = await response.json();
   assert.equal(body.code, "ICON_NAME_CONFLICT");
   assert.equal(body.conflict.name, "OkEmby");
-  assert.deepEqual(body.suggestions, ["OkEmby02", "OkEmby03"]);
+  assert.deepEqual(body.suggestions, ["OkEmby01", "OkEmby02"]);
   assert.equal(env.DB.submissions.get(id).status, "pending");
   assert.equal(readKv(env).icons.length, 1);
 });
