@@ -7,8 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>提交 Emby 图标</title>
     <link rel="stylesheet" href="/styles.css?v=20260729-ui23" />
+    <!-- Telegram Mini App SDK：在 Telegram 内打开时提供 WebApp API，普通浏览器里为空操作。 -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
       .standalone { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 64px; }
+      /* Telegram Mini App 自带顶部栏，收紧上方留白即可。 */
+      html.telegram-webapp .standalone { padding-top: 20px; }
       .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .standalone-card h1 { margin: 0 0 10px; }
       .standalone-card p { color: var(--muted); line-height: 1.6; }
@@ -70,6 +74,6 @@
       // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submit.js?v=20261009-ui24"></script>
+    <script type="module" src="/submit.js?v=20261009-ui25"></script>
   </body>
 </html>

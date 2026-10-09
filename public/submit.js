@@ -306,4 +306,19 @@ form.addEventListener("submit", async (event) => {
 
 if (nameExample) renderNameExample();
 
+// 作为 Telegram Mini App 打开时，通知 Telegram 页面已就绪并铺满可视区域；
+// 在普通浏览器中 window.Telegram 不存在，直接跳过。
+function initTelegramWebApp() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) return;
+  try {
+    tg.ready();
+    tg.expand();
+    document.documentElement.classList.add("telegram-webapp");
+  } catch {
+    // 旧版本 SDK 或非 Telegram 环境：忽略即可。
+  }
+}
+
 loadTurnstile();
+initTelegramWebApp();
