@@ -274,17 +274,17 @@ export async function handlePut(request, env) {
   );
 }
 
-async function findPendingNameMatch(env, name) {
-  const key = normalizeIconName(name);
-  if (!key || !env?.DB) return null;
+// Names waiting in the review queue. Suggestions are filtered against these
+// too, so we never offer a name that is already awaiting review.
+async function listPendingNameRows(env) {
+  if (!env?.DB) return [];
   try {
     const result = await env.DB.prepare(
       "SELECT id, name, url FROM submissions WHERE status = 'pending' ORDER BY created_at ASC LIMIT 500",
     ).all();
-    const rows = Array.isArray(result?.results) ? result.results : [];
-    return rows.find((row) => row && normalizeIconName(row.name) === key) || null;
+    return Array.isArray(result?.results) ? result.results.filter((row) => row && row.name) : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -300,8 +300,12 @@ export async function handleNameCheck(request, env) {
     const conflict = findIconNameConflict(list, name);
     // A name that is not published yet can still collide with a waiting
     // submission, so flag that as an advisory while allowing the submit.
-    const pending = conflict ? null : await findPendingNameMatch(env, name);
-    const taken = pending ? [...list, pending] : list;
+    const pendingRows = await listPendingNameRows(env);
+    const key = normalizeIconName(name);
+    const pending = pendingRows.find((row) => normalizeIconName(row.name) === key) || null;
+    // Merge published and queued names so a suggestion is never a name that
+    // already exists or is already waiting for review.
+    const taken = [...list, ...pendingRows];
     return jsonResponse(
       {
         name,

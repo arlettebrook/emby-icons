@@ -133,42 +133,51 @@ function renderNameExample() {
   nameExample.replaceChildren();
 }
 
+// 建议名去重：忽略与当前输入相同、以及列表内重复的名称。
+function cleanSuggestions(body, value) {
+  const seen = new Set([String(value ?? "").trim().toLowerCase()]);
+  const list = [];
+  for (const item of Array.isArray(body?.suggestions) ? body.suggestions : []) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    const key = trimmed.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    list.push(trimmed);
+  }
+  return list;
+}
+
+// 冲突提示与队列重复提示共用一个渲染器，只是标题文案与配色不同。
+function renderNameHint(kind, message, suggestions) {
+  const nodes = [message];
+  if (suggestions.length) {
+    const label = document.createElement("span");
+    label.className = "name-hint-label";
+    label.textContent = "建议改名（点击填入）：";
+    nodes.push(label, makeSuggestionChips(suggestions));
+  }
+  showNameHint(kind, ...nodes);
+}
+
 function renderNameConflict(body, value) {
-  const suggestions = Array.isArray(body.suggestions)
-    ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
-    : [];
+  const suggestions = cleanSuggestions(body, value);
   nameCheckState = { value, exists: true, suggestions };
   setNameBlocked(true);
   const existing = body?.conflict?.name;
   const message = document.createElement("span");
   message.textContent = `该名称已存在${existing && existing !== value ? `（现有：${existing}）` : ""}，请换一个名字。`;
-  const nodes = [message];
-  if (suggestions.length) {
-    const label = document.createElement("span");
-    label.className = "name-hint-label";
-    label.textContent = "建议改名（点击填入）：";
-    nodes.push(label, makeSuggestionChips(suggestions));
-  }
-  showNameHint("conflict", ...nodes);
+  renderNameHint("conflict", message, suggestions);
 }
 
 // 队列中已有同名提交：属于提醒而非阻断，允许继续提交但建议改名。
 function renderQueueWarning(body, value) {
-  const suggestions = Array.isArray(body.suggestions)
-    ? body.suggestions.filter((item) => typeof item === "string" && item.trim())
-    : [];
+  const suggestions = cleanSuggestions(body, value);
   nameCheckState = { value, exists: false, suggestions };
   setNameBlocked(false);
   const message = document.createElement("span");
   message.textContent = "待审核队列中已有一条同名提交，通过审核时可能被视为重复，建议改名。";
-  const nodes = [message];
-  if (suggestions.length) {
-    const label = document.createElement("span");
-    label.className = "name-hint-label";
-    label.textContent = "建议改名（点击填入）：";
-    nodes.push(label, makeSuggestionChips(suggestions));
-  }
-  showNameHint("warn", ...nodes);
+  renderNameHint("warn", message, suggestions);
 }
 
 function currentNameConflicts() {

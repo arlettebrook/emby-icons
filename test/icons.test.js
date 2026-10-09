@@ -262,6 +262,23 @@ test("public name check reports conflicts with suggestions", async () => {
   assert.equal(blankBody.exists, false);
 });
 
+test("name check suggestions skip names already waiting in the queue", async () => {
+  const env = createSubmissionEnvironment({ icons: [{ name: "test", url: "https://example.com/test.png" }] });
+  await createSubmission(env, "test01", "https://example.com/test01.png");
+
+  // Published conflict: test01 is queued, so it must be filtered from suggestions.
+  const conflict = await handleNameCheck(new Request("https://example.com/api/name-check?name=test"), env);
+  const conflictBody = await conflict.json();
+  assert.equal(conflictBody.exists, true);
+  assert.deepEqual(conflictBody.suggestions, ["test02", "test03"]);
+
+  // Queue conflict: still filtered against published + pending names.
+  const dup = await handleNameCheck(new Request("https://example.com/api/name-check?name=test01"), env);
+  const dupBody = await dup.json();
+  assert.equal(dupBody.queueDuplicate, true);
+  assert.deepEqual(dupBody.suggestions, ["test02", "test03"]);
+});
+
 test("public name check flags names already waiting in the review queue", async () => {
   const env = createSubmissionEnvironment({ icons: [{ name: "OkEmby", url: "https://example.com/existing.png" }] });
   await createSubmission(env, "Wait", "https://example.com/wait.png");
