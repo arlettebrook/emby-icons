@@ -14,30 +14,111 @@
       /* Telegram Mini App 自带顶部栏，收紧上方留白即可。 */
       html.telegram-webapp .standalone { padding-top: 20px; }
       .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
-      .standalone-card h1 { margin: 0 0 10px; }
-      .standalone-card > p { color: var(--muted); line-height: 1.6; }
-      .submission-list { display: grid; gap: 10px; margin-top: 24px; }
-      .submission-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(7 16 14 / 72%); }
-      .submission-card h2 { margin: 0 0 6px; font-size: 16px; }
-      .submission-card p { margin: 4px 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-      .submission-card[data-active="true"] { border-color: rgb(120 174 252 / 70%); box-shadow: inset 0 0 0 1px rgb(120 174 252 / 35%); }
-      .submission-status { color: var(--accent); }
-      .submission-empty { margin-top: 24px; padding: 28px 16px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); text-align: center; }
-      .submission-info { display: grid; gap: 9px; margin-top: 22px; padding: 16px; border-radius: 9px; background: var(--accent-soft); }
-      .submission-info strong { color: var(--accent); }
-      .submission-info span { overflow-wrap: anywhere; }
-      .standalone-form { display: grid; gap: 16px; margin-top: 20px; }
+
+      /* 顶部标题 + 记录数 */
+      .submission-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+      .submission-hero h1 { margin: 0 0 10px; }
+      .submission-lede { max-width: 62ch; color: var(--muted); line-height: 1.65; }
+      .submission-count { flex: 0 0 auto; display: grid; justify-items: center; gap: 2px; min-width: 76px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--accent-soft); }
+      .submission-count[hidden] { display: none; }
+      .submission-count strong { color: #0369a1; font-size: 22px; line-height: 1; }
+      .submission-count span { color: var(--muted); font-size: 12px; }
+
+      /* 提交列表：整卡可点击 */
+      .submission-list { display: grid; gap: 10px; margin-top: 22px; }
+      .submission-card { position: relative; width: 100%; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+      .submission-card:hover { border-color: var(--accent-strong); box-shadow: 0 12px 28px rgb(14 165 233 / 12%); transform: translateY(-1px); }
+      .submission-card:active { transform: translateY(0); }
+      .submission-card[data-active="true"] { border-color: var(--accent-strong); box-shadow: 0 0 0 1px rgb(56 189 248 / 42%), 0 14px 30px rgb(14 165 233 / 13%); }
+      .submission-card[data-active="true"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-strong); }
+      .card-thumb { width: 46px; height: 46px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(145deg, #effaff, #dff5fa); }
+      .card-thumb-fallback { display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--line); border-radius: 10px; background: #f1f5f9; color: var(--faint); font-size: 18px; font-weight: 800; }
+      .card-main { min-width: 0; display: grid; gap: 5px; }
+      .card-title { overflow: hidden; color: #0f172a; font-size: 16px; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+      .card-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .card-id { overflow: hidden; color: var(--faint); font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+      .card-chevron { flex: 0 0 auto; color: var(--faint); font-size: 22px; line-height: 1; transition: color 150ms ease, transform 150ms ease; }
+      .submission-card:hover .card-chevron, .submission-card[data-active="true"] .card-chevron { color: var(--accent-strong); transform: translateX(2px); }
+
+      /* 状态标签 */
+      .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 720; white-space: nowrap; }
+      .status-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .status-badge.pending { border-color: rgb(217 119 6 / 30%); background: #fff7ed; color: #b45309; }
+      .status-badge.approving { border-color: rgb(56 189 248 / 42%); background: #e0f2fe; color: #0369a1; }
+      .status-badge.approved { border-color: rgb(16 185 129 / 32%); background: #ecfdf5; color: #047857; }
+      .status-badge.rejected { border-color: rgb(225 29 72 / 30%); background: #fff1f2; color: #be123c; }
+      .status-badge.withdrawn { border-color: rgb(100 116 139 / 32%); background: #f1f5f9; color: #475569; }
+
+      /* 空状态 */
+      .submission-empty { display: grid; justify-items: center; gap: 10px; margin-top: 22px; padding: 34px 18px; border: 1px dashed var(--line-strong); border-radius: 12px; background: #f8fbfd; color: var(--muted); text-align: center; }
+      .submission-empty[hidden] { display: none; }
+      .submission-empty-title { color: var(--ink); font-size: 15px; font-weight: 720; }
+      .submission-empty-text { font-size: 13px; }
+
+      /* 详情面板 */
+      .submission-detail { margin-top: 22px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; box-shadow: 0 12px 30px rgb(15 23 42 / 6%); }
+      .submission-detail[hidden] { display: none; }
+      .detail-head { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+      .detail-thumb { width: 62px; height: 62px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, #effaff, #dff5fa); }
+      .detail-thumb-fallback { display: grid; place-items: center; width: 62px; height: 62px; border: 1px solid var(--line); border-radius: 12px; background: #f1f5f9; color: var(--faint); font-size: 22px; font-weight: 800; }
+      .detail-head-text { min-width: 0; display: grid; gap: 7px; }
+      .detail-head-text h2 { font-size: 18px; overflow-wrap: anywhere; }
+      .submission-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 16px 0 0; padding: 0; }
+      .submission-info .meta-row { min-width: 0; display: grid; gap: 3px; }
+      .submission-info .meta-row.span-2 { grid-column: 1 / -1; }
+      .submission-info dt { color: var(--muted); font-size: 12px; font-weight: 700; }
+      .submission-info dd { margin: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+      .meta-inline { display: flex; align-items: center; gap: 8px; }
+      /* URL 可能是很长的 data: 串：最多显示两行，点「复制」拿完整值。 */
+      .meta-link { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: #0369a1; font-size: 12px; line-height: 1.55; text-decoration: none; overflow-wrap: anywhere; word-break: break-all; }
+      .meta-link:hover { text-decoration: underline; }
+      .copy-button { flex: 0 0 auto; align-self: flex-start; margin-top: 1px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: #ffffff; color: var(--muted); font-size: 12px; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease; }
+      .copy-button:hover { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
+
+      /* 编辑表单 */
+      .standalone-form { display: grid; gap: 16px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+      .standalone-form[hidden] { display: none; }
       .standalone-form textarea { min-height: 100px; resize: vertical; }
-      .submission-actions, .standalone-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-      .standalone-links { justify-content: space-between; }
-      .standalone-links a { text-decoration: none; }
       .form-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
       .form-note[hidden] { display: none; }
-      .button-danger { border-color: rgb(255 113 140 / 48%); color: var(--danger); }
-      .button-danger:hover:not(:disabled) { border-color: rgb(255 113 140 / 78%); background: rgb(255 113 140 / 14%); color: var(--danger); }
-      .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; }
-      .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
-      @media (max-width: 680px) { .standalone { width: calc(100% - 28px); padding: 32px 0 48px; } .standalone-card { padding: 22px 18px; } .submission-card { grid-template-columns: 1fr; } .submission-actions, .standalone-links { display: grid; grid-template-columns: 1fr; } .submission-actions .button, .standalone-links .button { width: 100%; min-height: 44px; } .standalone-links { justify-content: flex-start; } }
+      .form-note.accent { padding: 10px 12px; border: 1px solid rgb(56 189 248 / 40%); border-radius: 8px; background: #effaff; color: #0369a1; }
+
+      /* 操作按钮 */
+      .submission-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+      .submission-actions[hidden] { display: none; }
+      .submission-danger { display: grid; gap: 10px; padding: 14px; border: 1px solid rgb(225 29 72 / 22%); border-radius: 10px; background: #fffafa; }
+      .submission-danger .button { justify-self: start; }
+      .submission-actions .button[hidden] { display: none; }
+      .button-danger { border-color: rgb(225 29 72 / 32%); background: #fff1f2; color: #be123c; }
+      .button-danger:hover:not(:disabled) { border-color: rgb(225 29 72 / 55%); background: #ffe4e6; color: #9f1239; }
+      /* 防误触：第一次点击后按钮进入待确认态，再点一次才真正执行。 */
+      .button[data-confirm="true"] { box-shadow: 0 0 0 3px rgb(225 29 72 / 14%); }
+      .button-secondary[data-confirm="true"] { box-shadow: 0 0 0 3px rgb(56 189 248 / 18%); }
+      .button[data-busy="true"] { cursor: progress; opacity: 0.8; }
+      .button[data-busy="true"]::before { content: ""; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin 700ms linear infinite; }
+      @keyframes button-spin { to { transform: rotate(360deg); } }
+
+      /* 结果提示与底部链接 */
+      .standalone-result { margin-top: 18px; padding: 13px 14px; border: 1px solid rgb(56 189 248 / 40%); border-radius: 9px; background: #effaff; color: #0369a1; line-height: 1.6; overflow-wrap: anywhere; }
+      .standalone-result[hidden] { display: none; }
+      .standalone-result.error { border-color: rgb(225 29 72 / 30%); background: #fff1f2; color: #be123c; }
+      .standalone-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 20px; }
+      .standalone-links a { text-decoration: none; }
+
+      @media (max-width: 680px) {
+        .standalone { width: calc(100% - 28px); padding: 32px 0 48px; }
+        .standalone-card { padding: 22px 18px; }
+        .submission-hero { flex-direction: column; gap: 12px; }
+        .submission-count { justify-self: start; }
+        .submission-info { grid-template-columns: 1fr; }
+        .submission-card { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 11px; padding: 12px; }
+        .card-thumb, .card-thumb-fallback { width: 40px; height: 40px; }
+        .submission-actions { display: grid; grid-template-columns: 1fr; }
+        .submission-actions .button { width: 100%; min-height: 44px; }
+        .submission-danger .button { justify-self: stretch; }
+        .standalone-links { display: grid; grid-template-columns: 1fr; }
+        .standalone-links .button { width: 100%; }
+      }
       @media (max-width: 360px) { .standalone { width: calc(100% - 20px); } .standalone-card { padding-inline: 15px; } }
     </style>
   </head>
@@ -56,29 +137,53 @@
     </header>
     <main class="standalone">
       <section class="standalone-card">
-        <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
-        <h1>我的提交</h1>
-        <p>当前浏览器会自动保存你的提交记录。你可以查看状态、直接修改待审核的提交；被拒绝或已撤回的记录也能改好后重新提交，不需要的记录可以随时删除。</p>
-        <div class="submission-list" id="submission-list"></div>
-        <div class="submission-empty" id="submission-empty" hidden>当前浏览器还没有保存的提交记录。提交图标后，这里会自动显示。</div>
-        <div class="submission-info" id="submission-info" hidden></div>
-        <form class="standalone-form" id="edit-form" hidden>
-          <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
-          <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
-          <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
-          <p class="form-note" id="resubmit-hint" hidden>改好名称、链接和说明后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
-          <div class="submission-actions">
-            <button class="button button-primary" id="save-button" type="submit">保存修改</button>
-            <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
+        <div class="submission-hero">
+          <div>
+            <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
+            <h1>我的提交</h1>
+            <p class="submission-lede">当前浏览器会自动保存你的提交记录。待审核可直接修改；被拒绝或已撤回的记录可改好后重新提交；不需要的记录可随时删除。</p>
           </div>
-        </form>
-        <div class="submission-actions" id="record-actions" hidden>
-          <button class="button button-danger" id="delete-button" type="button">删除记录</button>
+          <div class="submission-count" id="submission-count" hidden><strong id="submission-count-value">0</strong><span>条记录</span></div>
         </div>
-        <div class="standalone-result" id="result" hidden></div>
+
+        <div class="submission-list" id="submission-list"></div>
+        <div class="submission-empty" id="submission-empty" hidden>
+          <p class="submission-empty-title">还没有提交记录</p>
+          <p class="submission-empty-text">提交图标后，这里会自动显示它的审核状态。</p>
+          <a class="button button-primary" href="/submit.html">提交新的图标</a>
+        </div>
+
+        <section class="submission-detail" id="submission-detail" hidden>
+          <div class="detail-head">
+            <span id="detail-thumb-slot"></span>
+            <div class="detail-head-text">
+              <h2 id="detail-name">—</h2>
+              <span class="status-badge" id="detail-badge"></span>
+            </div>
+          </div>
+          <dl class="submission-info" id="submission-info"></dl>
+          <form class="standalone-form" id="edit-form" hidden>
+            <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
+            <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
+            <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
+            <p class="form-note accent" id="resubmit-hint" hidden>改好名称、链接和说明后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
+            <div class="submission-actions">
+              <button class="button button-primary" id="save-button" type="submit">保存修改</button>
+              <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
+              <button class="button button-secondary" id="withdraw-cancel" type="button" hidden>取消撤回</button>
+            </div>
+          </form>
+          <div class="submission-actions submission-danger" id="record-actions" hidden>
+            <p class="form-note">删除后本页面不再显示该记录；仍在待审核的提交会一并从队列移除，且无法恢复。如果已经发布，图标本身不会被下架。</p>
+            <button class="button button-danger" id="delete-button" type="button">删除记录</button>
+            <button class="button button-secondary" id="delete-cancel" type="button" hidden>取消</button>
+          </div>
+        </section>
+
+        <div class="standalone-result" id="result" role="status" aria-live="polite" hidden></div>
         <div class="standalone-links"><a class="button button-primary" href="/submit.html">提交新的图标</a><a class="button button-secondary" href="/">返回主页</a></div>
       </section>
     </main>
-    <script type="module" src="/submission.js?v=20261009-ui23"></script>
+    <script type="module" src="/submission.js?v=20261010-ui24"></script>
   </body>
 </html>
