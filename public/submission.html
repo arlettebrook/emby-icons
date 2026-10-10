@@ -7,8 +7,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>我的提交</title>
     <link rel="stylesheet" href="/styles.css?v=20260729-ui23" />
+    <!-- Telegram Mini App SDK：在 Telegram 内打开时提供 WebApp API，普通浏览器里为空操作。 -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
       .standalone { width: min(820px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 64px; }
+      /* Telegram Mini App 自带顶部栏，收紧上方留白即可。 */
+      html.telegram-webapp .standalone { padding-top: 20px; }
       .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .standalone-card h1 { margin: 0 0 10px; }
       .standalone-card > p { color: var(--muted); line-height: 1.6; }
@@ -16,6 +20,7 @@
       .submission-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(7 16 14 / 72%); }
       .submission-card h2 { margin: 0 0 6px; font-size: 16px; }
       .submission-card p { margin: 4px 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+      .submission-card[data-active="true"] { border-color: rgb(120 174 252 / 70%); box-shadow: inset 0 0 0 1px rgb(120 174 252 / 35%); }
       .submission-status { color: var(--accent); }
       .submission-empty { margin-top: 24px; padding: 28px 16px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); text-align: center; }
       .submission-info { display: grid; gap: 9px; margin-top: 22px; padding: 16px; border-radius: 9px; background: var(--accent-soft); }
@@ -26,6 +31,10 @@
       .submission-actions, .standalone-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
       .standalone-links { justify-content: space-between; }
       .standalone-links a { text-decoration: none; }
+      .form-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+      .form-note[hidden] { display: none; }
+      .button-danger { border-color: rgb(255 113 140 / 48%); color: var(--danger); }
+      .button-danger:hover:not(:disabled) { border-color: rgb(255 113 140 / 78%); background: rgb(255 113 140 / 14%); color: var(--danger); }
       .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; }
       .standalone-result.error { background: rgb(255 113 140 / 12%); color: var(--danger); }
       @media (max-width: 680px) { .standalone { width: calc(100% - 28px); padding: 32px 0 48px; } .standalone-card { padding: 22px 18px; } .submission-card { grid-template-columns: 1fr; } .submission-actions, .standalone-links { display: grid; grid-template-columns: 1fr; } .submission-actions .button, .standalone-links .button { width: 100%; min-height: 44px; } .standalone-links { justify-content: flex-start; } }
@@ -49,7 +58,7 @@
       <section class="standalone-card">
         <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
         <h1>我的提交</h1>
-        <p>当前浏览器会自动保存你的提交记录。你可以直接查看状态，待审核提交还可以修改或撤回。</p>
+        <p>当前浏览器会自动保存你的提交记录。你可以查看状态、直接修改待审核的提交；被拒绝或已撤回的记录也能改好后重新提交，不需要的记录可以随时删除。</p>
         <div class="submission-list" id="submission-list"></div>
         <div class="submission-empty" id="submission-empty" hidden>当前浏览器还没有保存的提交记录。提交图标后，这里会自动显示。</div>
         <div class="submission-info" id="submission-info" hidden></div>
@@ -57,15 +66,19 @@
           <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
           <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
           <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
+          <p class="form-note" id="resubmit-hint" hidden>改好名称、链接和说明后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
           <div class="submission-actions">
-            <button class="button button-primary" type="submit">保存修改</button>
+            <button class="button button-primary" id="save-button" type="submit">保存修改</button>
             <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
           </div>
         </form>
+        <div class="submission-actions" id="record-actions" hidden>
+          <button class="button button-danger" id="delete-button" type="button">删除记录</button>
+        </div>
         <div class="standalone-result" id="result" hidden></div>
         <div class="standalone-links"><a class="button button-primary" href="/submit.html">提交新的图标</a><a class="button button-secondary" href="/">返回主页</a></div>
       </section>
     </main>
-    <script type="module" src="/submission.js?v=20261007-ui22"></script>
+    <script type="module" src="/submission.js?v=20261009-ui23"></script>
   </body>
 </html>

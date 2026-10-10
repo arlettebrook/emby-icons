@@ -187,3 +187,136 @@ test("KV success with a failed D1 update never returns the submission to pending
   assert.equal(env.DB.submissions.get(id).status, "approved");
   assert.equal(readKv(env).icons.length, 1);
 });
+
+// 创建一条提交并返回它的访问凭证，供撤回/重新提交/删除用例使用。
+async function createWithToken(env, name, url) {
+  const response = await handleSubmissionCreate(
+    new Request("https://example.com/api/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, url }),
+    }),
+    env,
+  );
+  const body = await response.json();
+  return { id: body.submission.id, token: body.accessToken };
+}
+
+function ownerRequest(id, token, init = {}) {
+  return new Request(`https://example.com/api/submissions/${id}`, {
+    ...init,
+    headers: { "X-Submission-Token": token, ...(init.headers || {}) },
+  });
+}
+
+test("a rejected submission can be edited and resubmitted into the queue", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+  await decide(env, id, { action: "reject", note: "名字太随意" });
+  assert.equal(env.DB.submissions.get(id).status, "rejected");
+
+  const response = await handleSubmissionItem(
+    ownerRequest(id, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "DemoFixed",
+        url: "https://example.com/demo-fixed.png",
+        note: "按拒绝原因改好了",
+        resubmit: true,
+      }),
+    }),
+    env,
+    id,
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.resubmitted, true);
+  assert.equal(body.submission.status, "pending");
+  assert.equal(body.submission.name, "DemoFixed");
+  const row = env.DB.submissions.get(id);
+  assert.equal(row.status, "pending");
+  assert.equal(row.name, "DemoFixed");
+  assert.equal(row.url, "https://example.com/demo-fixed.png");
+  // 重新排队必须清掉旧的拒绝结论，否则审核人会看到过期的原因。
+  assert.equal(row.reviewer_note, null);
+  assert.equal(row.reviewer_id, null);
+  assert.equal(row.reviewed_at, null);
+  const audit = env.DB.auditLogs.map((entry) => entry.action);
+  assert.ok(audit.includes("submission-resubmitted"));
+});
+
+test("a withdrawn submission can be resubmitted without resubmit-flag errors", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+  await handleSubmissionItem(ownerRequest(id, token, { method: "POST" }), env, id);
+  assert.equal(env.DB.submissions.get(id).status, "withdrawn");
+
+  const response = await handleSubmissionItem(
+    ownerRequest(id, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Demo", url: "https://example.com/demo.png", note: "", resubmit: true }),
+    }),
+    env,
+    id,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).submission.status, "pending");
+  assert.equal(env.DB.submissions.get(id).status, "pending");
+});
+
+test("editing a resolved submission without the resubmit flag stays rejected", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+  await decide(env, id, { action: "reject", note: "" });
+
+  const response = await handleSubmissionItem(
+    ownerRequest(id, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Nope", url: "https://example.com/nope.png", note: "" }),
+    }),
+    env,
+    id,
+  );
+
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.submissions.get(id).status, "rejected");
+  assert.equal(env.DB.submissions.get(id).name, "Demo");
+});
+
+test("deleting a submission removes the record for its owner", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+
+  const response = await handleSubmissionItem(ownerRequest(id, token, { method: "DELETE" }), env, id);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).deleted, true);
+  assert.equal(env.DB.submissions.has(id), false);
+  assert.ok(env.DB.auditLogs.some((entry) => entry.action === "submission-deleted"));
+
+  // 记录已经不存在，后续读取必须变成 404 而不是悄悄返回旧数据。
+  const after = await handleSubmissionItem(ownerRequest(id, token), env, id);
+  assert.equal(after.status, 404);
+});
+
+test("deleting requires the owner token and skips mid-publication records", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+
+  const denied = await handleSubmissionItem(
+    ownerRequest(id, "wrong-token", { method: "DELETE" }),
+    env,
+    id,
+  );
+  assert.equal(denied.status, 403);
+  assert.equal(env.DB.submissions.has(id), true);
+
+  env.DB.submissions.get(id).status = "approving";
+  const blocked = await handleSubmissionItem(ownerRequest(id, token, { method: "DELETE" }), env, id);
+  assert.equal(blocked.status, 409);
+  assert.equal(env.DB.submissions.has(id), true);
+});

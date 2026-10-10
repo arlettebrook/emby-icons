@@ -10,7 +10,7 @@ import {
   writeAuditLog,
 } from "./icons.js";
 import { hasAdminAccess } from "./admin.js";
-import { queueSubmissionNotification } from "./telegram.js";
+import { clearSubmissionConflictState, queueSubmissionNotification } from "./telegram.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 120;
@@ -20,7 +20,7 @@ const DEFAULT_SUBMISSIONS_PER_IP_PER_DAY = 20;
 
 function corsHeaders(request, env) {
   const headers = {
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match, X-Submission-Token, X-Turnstile-Token",
     "Access-Control-Expose-Headers": "ETag",
     "Cache-Control": "no-store",
@@ -286,7 +286,7 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   );
 }
 
-export async function handleSubmissionItem(request, env, id) {
+export async function handleSubmissionItem(request, env, id, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
   const ownership = await requireSubmissionOwner(request, env, id);
@@ -294,14 +294,31 @@ export async function handleSubmissionItem(request, env, id) {
   const { row } = ownership;
 
   if (request.method === "GET") return jsonResponse(request, env, { submission: publicSubmission(row) });
+
+  if (request.method === "DELETE") {
+    // A record that is mid-publication must not vanish under the reviewer's feet.
+    if (row.status === "approving") {
+      return jsonResponse(request, env, { error: "该提交正在发布中，请稍后再删除" }, { status: 409 });
+    }
+    await env.DB.prepare("DELETE FROM submissions WHERE id = ?1").bind(id).run();
+    await writeAuditLog(env, {
+      actorId: `submission:${id}`,
+      action: "submission-deleted",
+      targetId: id,
+      details: { name: row.name, status: row.status },
+    });
+    await clearSubmissionConflictState(env, id);
+    return jsonResponse(request, env, { ok: true, deleted: true });
+  }
+
   if (request.method === "POST") {
     if (row.status !== "pending") return jsonResponse(request, env, { error: "Only pending submissions can be withdrawn" }, { status: 409 });
     await env.DB.prepare("UPDATE submissions SET status = 'withdrawn' WHERE id = ?1 AND status = 'pending'").bind(id).run();
     await writeAuditLog(env, { actorId: `submission:${id}`, action: "submission-withdrawn", targetId: id });
     return jsonResponse(request, env, { ok: true, status: "withdrawn" });
   }
+
   if (request.method !== "PATCH") return jsonResponse(request, env, { error: "Method not allowed" }, { status: 405 });
-  if (row.status !== "pending") return jsonResponse(request, env, { error: "Only pending submissions can be edited" }, { status: 409 });
 
   let body;
   try {
@@ -311,11 +328,53 @@ export async function handleSubmissionItem(request, env, id) {
   }
   const validation = validateSubmission(body);
   if (validation.error) return jsonResponse(request, env, { error: validation.error }, { status: 400 });
-  await env.DB.prepare("UPDATE submissions SET name = ?1, url = ?2, note = ?3 WHERE id = ?4 AND status = 'pending'")
+
+  if (row.status === "pending") {
+    await env.DB.prepare("UPDATE submissions SET name = ?1, url = ?2, note = ?3 WHERE id = ?4 AND status = 'pending'")
+      .bind(validation.value.name, validation.value.url, validation.value.note, id)
+      .run();
+    await writeAuditLog(env, { actorId: `submission:${id}`, action: "submission-updated", targetId: id, details: validation.value });
+    return jsonResponse(request, env, { ok: true, submission: { ...publicSubmission(row), ...validation.value } });
+  }
+
+  // 重新提交：被拒绝或已撤回的记录，允许改好名称/链接/说明后重新进入待审核队列。
+  const resubmit = body?.resubmit === true;
+  if (!resubmit || (row.status !== "rejected" && row.status !== "withdrawn")) {
+    return jsonResponse(request, env, { error: "Only pending submissions can be edited" }, { status: 409 });
+  }
+
+  const reset = await env.DB
+    .prepare(
+      "UPDATE submissions SET name = ?1, url = ?2, note = ?3, status = 'pending', reviewer_id = NULL, reviewer_note = NULL, reviewed_at = NULL WHERE id = ?4 AND status IN ('rejected', 'withdrawn')",
+    )
     .bind(validation.value.name, validation.value.url, validation.value.note, id)
     .run();
-  await writeAuditLog(env, { actorId: `submission:${id}`, action: "submission-updated", targetId: id, details: validation.value });
-  return jsonResponse(request, env, { ok: true, submission: { ...publicSubmission(row), ...validation.value } });
+  if (!reset.meta?.changes) {
+    const latest = await readSubmission(env, id);
+    if (!latest || latest.status !== "pending") {
+      return jsonResponse(request, env, { error: "提交状态已变化，请刷新后重试" }, { status: 409 });
+    }
+  }
+  await writeAuditLog(env, { actorId: `submission:${id}`, action: "submission-resubmitted", targetId: id, details: validation.value });
+  // 重新排队后要让审核人再次看到卡片，否则记录会静默地回到队列里。
+  await queueSubmissionNotification(
+    env,
+    { id, name: validation.value.name, url: validation.value.url, note: validation.value.note },
+    waitUntil,
+    new URL(request.url).origin,
+  );
+  return jsonResponse(request, env, {
+    ok: true,
+    resubmitted: true,
+    submission: {
+      ...publicSubmission(row),
+      ...validation.value,
+      status: "pending",
+      reviewer_id: null,
+      reviewer_note: null,
+      reviewed_at: null,
+    },
+  });
 }
 
 export async function handleAdminSubmissionList(request, env) {

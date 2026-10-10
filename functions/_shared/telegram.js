@@ -255,6 +255,16 @@ function conflictStateKey(id) {
   return `settings/telegram/conflict/${id}`;
 }
 
+// 提交记录被删除后，顺手清掉为它保存的建议列表，避免 KV 里留下孤立的键。
+export async function clearSubmissionConflictState(env, id) {
+  if (!env?.EMBY_ICONS || !id) return;
+  try {
+    await env.EMBY_ICONS.delete(conflictStateKey(id));
+  } catch {
+    // 清理是尽力而为：失败也不应影响删除结果。
+  }
+}
+
 function conflictKeyboard(submission, suggestions, { replace = true } = {}) {
   const id = submission.id;
   const list = (Array.isArray(suggestions) ? suggestions : []).filter((name) => typeof name === "string" && name.trim());

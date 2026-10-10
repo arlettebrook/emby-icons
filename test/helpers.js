@@ -75,7 +75,27 @@ class FakeD1 {
             }
             return { meta: { changes: 0 } };
           }
-          if (text.startsWith("UPDATE submissions SET name = ?1, url = ?2, note = ?3")) {
+          if (text.startsWith("DELETE FROM submissions WHERE id = ?1")) {
+            const existed = db.submissions.delete(values[0]);
+            return { meta: { changes: existed ? 1 : 0 } };
+          }
+          if (text.startsWith("UPDATE submissions SET name = ?1, url = ?2, note = ?3, status = 'pending'")) {
+            // 重新提交：被拒绝/已撤回的记录改好后回到待审核队列。
+            const [name, url, note, id] = values;
+            const row = db.submissions.get(id);
+            if (row && (row.status === "rejected" || row.status === "withdrawn")) {
+              row.name = name;
+              row.url = url;
+              row.note = note;
+              row.status = "pending";
+              row.reviewer_id = null;
+              row.reviewer_note = null;
+              row.reviewed_at = null;
+              return { meta: { changes: 1 } };
+            }
+            return { meta: { changes: 0 } };
+          }
+          if (text.startsWith("UPDATE submissions SET name = ?1, url = ?2, note = ?3 WHERE id = ?4 AND status = 'pending'")) {
             const [name, url, note, id] = values;
             const row = db.submissions.get(id);
             if (row && row.status === "pending") {
