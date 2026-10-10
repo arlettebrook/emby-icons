@@ -23,6 +23,10 @@
       .submission-count[hidden] { display: none; }
       .submission-count strong { color: #0369a1; font-size: 22px; line-height: 1; }
       .submission-count span { color: var(--muted); font-size: 12px; }
+      .submission-hero-side { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+      .submission-clear { display: flex; align-items: center; gap: 8px; }
+      .submission-clear[hidden] { display: none; }
+      .submission-clear .button { padding: 8px 12px; font-size: 13px; white-space: nowrap; }
 
       /* 提交列表：整卡可点击 */
       .submission-list { display: grid; gap: 10px; margin-top: 22px; }
@@ -56,7 +60,10 @@
       .submission-empty-text { font-size: 13px; }
 
       /* 详情面板 */
-      .submission-detail { margin-top: 22px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; box-shadow: 0 12px 30px rgb(15 23 42 / 6%); }
+      .submission-detail { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; box-shadow: 0 12px 30px rgb(15 23 42 / 6%); }
+      /* 内联在记录卡片下面时，用一个小尖角指向所属卡片。 */
+      .submission-list .submission-detail { position: relative; border-color: var(--line-strong); background: #fbfdff; }
+      .submission-list .submission-detail::before { content: ""; position: absolute; left: 26px; top: -7px; width: 12px; height: 12px; transform: rotate(45deg); border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong); background: #fbfdff; }
       .submission-detail[hidden] { display: none; }
       .detail-head { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
       .detail-thumb { width: 62px; height: 62px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, #effaff, #dff5fa); }
@@ -88,7 +95,7 @@
       .submission-actions[hidden] { display: none; }
       .submission-danger { display: grid; gap: 10px; padding: 14px; border: 1px solid rgb(225 29 72 / 22%); border-radius: 10px; background: #fffafa; }
       .submission-danger .button { justify-self: start; }
-      .submission-actions .button[hidden] { display: none; }
+      .button[hidden] { display: none; }
       .button-danger { border-color: rgb(225 29 72 / 32%); background: #fff1f2; color: #be123c; }
       .button-danger:hover:not(:disabled) { border-color: rgb(225 29 72 / 55%); background: #ffe4e6; color: #9f1239; }
       /* 防误触：第一次点击后按钮进入待确认态，再点一次才真正执行。 */
@@ -102,6 +109,7 @@
       .standalone-result { margin-top: 18px; padding: 13px 14px; border: 1px solid rgb(56 189 248 / 40%); border-radius: 9px; background: #effaff; color: #0369a1; line-height: 1.6; overflow-wrap: anywhere; }
       .standalone-result[hidden] { display: none; }
       .standalone-result.error { border-color: rgb(225 29 72 / 30%); background: #fff1f2; color: #be123c; }
+      .submission-detail .standalone-result { margin: 14px 0 0; }
       .standalone-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 20px; }
       .standalone-links a { text-decoration: none; }
 
@@ -109,6 +117,7 @@
         .standalone { width: calc(100% - 28px); padding: 32px 0 48px; }
         .standalone-card { padding: 22px 18px; }
         .submission-hero { flex-direction: column; gap: 12px; }
+        .submission-hero-side { width: 100%; justify-content: space-between; }
         .submission-count { justify-self: start; }
         .submission-info { grid-template-columns: 1fr; }
         .submission-card { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 11px; padding: 12px; }
@@ -143,8 +152,16 @@
             <h1>我的提交</h1>
             <p class="submission-lede">当前浏览器会自动保存你的提交记录。待审核可直接修改；被拒绝或已撤回的记录可改好后重新提交；不需要的记录可随时删除。</p>
           </div>
-          <div class="submission-count" id="submission-count" hidden><strong id="submission-count-value">0</strong><span>条记录</span></div>
+          <div class="submission-hero-side">
+            <div class="submission-clear" id="submission-clear" hidden>
+              <button class="button button-danger" id="clear-all-button" type="button">清空全部记录</button>
+              <button class="button button-secondary" id="clear-all-cancel" type="button" hidden>取消</button>
+            </div>
+            <div class="submission-count" id="submission-count" hidden><strong id="submission-count-value">0</strong><span>条记录</span></div>
+          </div>
         </div>
+
+        <div class="standalone-result" id="result" role="status" aria-live="polite" hidden></div>
 
         <div class="submission-list" id="submission-list"></div>
         <div class="submission-empty" id="submission-empty" hidden>
@@ -162,6 +179,7 @@
             </div>
           </div>
           <dl class="submission-info" id="submission-info"></dl>
+          <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
           <form class="standalone-form" id="edit-form" hidden>
             <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
             <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
@@ -180,7 +198,6 @@
           </div>
         </section>
 
-        <div class="standalone-result" id="result" role="status" aria-live="polite" hidden></div>
         <div class="standalone-links"><a class="button button-primary" href="/submit.html">提交新的图标</a><a class="button button-secondary" href="/">返回主页</a></div>
       </section>
     </main>

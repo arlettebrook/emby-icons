@@ -19,10 +19,15 @@ const deleteCancel = document.querySelector("#delete-cancel");
 const recordActions = document.querySelector("#record-actions");
 const resubmitHint = document.querySelector("#resubmit-hint");
 const result = document.querySelector("#result");
+const detailResult = document.querySelector("#detail-result");
+const clearAllWrap = document.querySelector("#submission-clear");
+const clearAllButton = document.querySelector("#clear-all-button");
+const clearAllCancel = document.querySelector("#clear-all-cancel");
 const queryId = new URLSearchParams(window.location.search).get("id");
 let currentId = "";
 let currentToken = "";
 let currentStatus = "";
+let knownReferences = [];
 
 const STATUS_META = {
   pending: { label: "待审核", className: "pending" },
@@ -81,11 +86,11 @@ function applyBadge(element, status) {
   element.className = meta.className ? "status-badge " + meta.className : "status-badge";
 }
 
-function showResult(message, error = false) {
-  result.hidden = false;
-  result.textContent = message;
-  result.classList.toggle("error", error);
-  result.scrollIntoView({ behavior: "smooth", block: "nearest" });
+function showResult(message, error = false, target = result) {
+  target.hidden = false;
+  target.textContent = message;
+  target.classList.toggle("error", error);
+  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function formatTime(value) {
@@ -237,10 +242,14 @@ function renderSubmissionInfo(submission) {
 }
 
 function renderList(items) {
+  // 详情面板现在住在列表里，重绘前先摘下来，否则会被 replaceChildren 一起清掉。
+  detail.remove();
   list.replaceChildren();
+  const hasItems = items.length > 0;
   countValue.textContent = String(items.length);
-  countWrap.hidden = items.length === 0;
-  empty.hidden = items.length > 0;
+  countWrap.hidden = !hasItems;
+  clearAllWrap.hidden = !hasItems;
+  empty.hidden = hasItems;
   items.forEach(({ submission, token }) => {
     const card = document.createElement("button");
     card.type = "button";
@@ -270,7 +279,14 @@ function renderList(items) {
     chevron.textContent = "›";
 
     card.append(iconThumb(submission.url, "card"), main, chevron);
-    card.addEventListener("click", () => selectSubmission(submission.id, token, submission));
+    card.addEventListener("click", () => {
+      // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
+      if (currentId === submission.id && !detail.hidden) {
+        resetDetailPanel();
+        return;
+      }
+      selectSubmission(submission.id, token, submission);
+    });
     list.append(card);
   });
 }
@@ -281,6 +297,10 @@ function selectSubmission(id, token, submission, options) {
   currentToken = token;
   renderSubmissionInfo(submission);
   markActiveCard(id);
+  // 详情面板紧跟被点开的卡片，形成「在记录下面就地展开」的效果。
+  const activeCard = Array.from(list.querySelectorAll(".submission-card")).find((card) => card.dataset.id === id);
+  if (activeCard) activeCard.after(detail);
+  else list.append(detail);
   if (settings.scroll !== false) detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -310,22 +330,30 @@ function resetDetailPanel() {
   detail.hidden = true;
   editForm.hidden = true;
   recordActions.hidden = true;
+  detailResult.hidden = true;
   detailThumbSlot.replaceChildren();
+  markActiveCard("");
 }
 
 async function loadAll() {
   const references = readSavedSubmissions();
+  knownReferences = references;
   if (!references.length) {
     list.replaceChildren();
     resetDetailPanel();
     countWrap.hidden = true;
+    clearAllWrap.hidden = true;
     empty.hidden = false;
     return;
   }
   const loaded = await Promise.all(references.map(loadOne));
   // 服务端已经不存在的记录直接从本地清掉，避免列表里留下点不开的幽灵条目。
   loaded.filter((item) => item.missing).forEach((item) => removeSavedSubmission(item.id));
-  const valid = loaded.filter((item) => item.submission);
+  // 服务端返回顺序不稳定，按提交时间倒序排列，保证每次打开顺序一致（新的在上面）。
+  const submittedAt = (item) => Date.parse(item.submission.created_at || "") || 0;
+  const valid = loaded
+    .filter((item) => item.submission)
+    .sort((a, b) => submittedAt(b) - submittedAt(a));
   renderList(valid);
   // 保存/撤回/重新提交后仍然停留在同一条记录上，只有它消失时才回退到首条。
   const selected =
@@ -377,10 +405,10 @@ async function saveSubmission(event) {
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "保存失败（" + response.status + "）");
-        showResult(body.resubmitted ? "已重新提交，等待审核。" : "修改已保存。", false);
+        showResult(body.resubmitted ? "已重新提交，等待审核。" : "修改已保存。", false, detailResult);
         await loadAll();
       } catch (error) {
-        showResult(error.message, true);
+        showResult(error.message, true, detailResult);
       } finally {
         withdrawButton.disabled = false;
       }
@@ -398,10 +426,10 @@ async function withdrawSubmission() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "撤回失败（" + response.status + "）");
-      showResult("提交已撤回，可修改后重新提交。", false);
+      showResult("提交已撤回，可修改后重新提交。", false, detailResult);
       await loadAll();
     } catch (error) {
-      showResult(error.message, true);
+      showResult(error.message, true, detailResult);
     }
   });
 }
@@ -422,10 +450,44 @@ async function deleteSubmission() {
       }
       removeSavedSubmission(id);
       resetDetailPanel();
-      showResult("提交记录已删除。", false);
+      // 删除后面板会关闭，所以结果提示放到列表上方。
+      showResult("提交记录已删除。", false, result);
       await loadAll();
     } catch (error) {
-      showResult(error.message, true);
+      showResult(error.message, true, detailResult);
+    }
+  });
+}
+
+// 一键清空全部本地记录：逐条调用删除接口，发布中的记录服务端会拒绝，失败的最后统一提示。
+async function clearAllSubmissions() {
+  const references = knownReferences.slice();
+  if (!references.length) {
+    showResult("当前没有可清除的记录。", true, result);
+    return;
+  }
+  await runAction(clearAllButton, "清除中…", async () => {
+    let removed = 0;
+    let failed = 0;
+    for (const reference of references) {
+      try {
+        const response = await fetch("/api/submissions/" + encodeURIComponent(reference.id), {
+          method: "DELETE",
+          headers: { "X-Submission-Token": reference.token },
+        });
+        // 记录本来就不存在（404）也算清除成功。
+        if (!response.ok && response.status !== 404) throw new Error("删除失败（" + response.status + "）");
+        removeSavedSubmission(reference.id);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    await loadAll();
+    if (failed) {
+      showResult("已清除 " + removed + " 条记录，" + failed + " 条未能删除（发布中的提交不可删除），可稍后重试。", true, result);
+    } else {
+      showResult("已清除全部 " + removed + " 条记录。", false, result);
     }
   });
 }
@@ -489,6 +551,11 @@ function createConfirmFlow(button, cancelButton, options) {
 }
 
 // 表单控件都是首次渲染就存在，这里直接绑定，避免依赖渲染顺序。
+createConfirmFlow(clearAllButton, clearAllCancel, {
+  label: "清空全部记录",
+  confirmLabel: "确认清空全部",
+  action: clearAllSubmissions,
+});
 createConfirmFlow(withdrawButton, withdrawCancel, {
   label: "撤回提交",
   confirmLabel: "确认撤回",
