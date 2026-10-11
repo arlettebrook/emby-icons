@@ -2,9 +2,6 @@ const list = document.querySelector("#submission-list");
 const empty = document.querySelector("#submission-empty");
 const detail = document.querySelector("#submission-detail");
 const info = document.querySelector("#submission-info");
-const detailName = document.querySelector("#detail-name");
-const detailBadge = document.querySelector("#detail-badge");
-const detailThumbSlot = document.querySelector("#detail-thumb-slot");
 const countWrap = document.querySelector("#submission-count");
 const countValue = document.querySelector("#submission-count-value");
 const editForm = document.querySelector("#edit-form");
@@ -138,16 +135,16 @@ function formatTime(value) {
 }
 
 // 缩略图加载失败时用占位方块兜底，避免列表里留下破图。
-function iconThumb(url, variant) {
+function iconThumb(url) {
   const img = document.createElement("img");
-  img.className = variant === "detail" ? "detail-thumb" : "card-thumb";
+  img.className = "card-thumb";
   img.alt = "";
   img.decoding = "async";
   img.loading = "lazy";
   img.referrerPolicy = "no-referrer";
   img.addEventListener("error", () => {
     const fallback = document.createElement("span");
-    fallback.className = variant === "detail" ? "detail-thumb-fallback" : "card-thumb-fallback";
+    fallback.className = "card-thumb-fallback";
     fallback.textContent = "?";
     fallback.setAttribute("aria-hidden", "true");
     img.replaceWith(fallback);
@@ -346,8 +343,6 @@ function renderSubmissionInfo(submission) {
   // 换到另一条记录时，之前的「待确认」按钮不应该还亮着。
   resetConfirmFlows();
   currentStatus = submission.status;
-  detailName.textContent = submission.name;
-  applyBadge(detailBadge, submission.status);
   // 同一份数据重复渲染（保存后刷新、重新选中同一条）时不再重建详情块：
   // 元信息里的 URL 可能是几十 KB 的 data: 串，重建会让面板掉帧。
   // 用不会出现在字段里的控制字符拼接，避免名称/链接内容互相干扰。
@@ -362,7 +357,6 @@ function renderSubmissionInfo(submission) {
   ].join("\u0001");
   if (signature !== detailSignature) {
     detailSignature = signature;
-    detailThumbSlot.replaceChildren(iconThumb(submission.url, "detail"));
     renderMeta(submission);
   }
 
@@ -426,7 +420,7 @@ function buildCard() {
   chevron.setAttribute("aria-hidden", "true");
   chevron.textContent = "›";
 
-  const thumb = iconThumb("", "card");
+  const thumb = iconThumb("");
   card.append(thumb, main, chevron);
   card.__thumb = thumb;
   card.__title = title;
@@ -459,7 +453,7 @@ function updateCard(card, item) {
   applyBadge(card.__badge, submission.status);
   if (card.__thumbUrl !== submission.url) {
     card.__thumbUrl = submission.url;
-    const next = iconThumb(submission.url, "card");
+    const next = iconThumb(submission.url);
     card.__thumb.replaceWith(next);
     card.__thumb = next;
   }
@@ -656,7 +650,6 @@ function hideDetailPanel() {
   editForm.hidden = true;
   recordActions.hidden = true;
   detailResult.hidden = true;
-  detailThumbSlot.replaceChildren();
 }
 
 function resetDetailPanel(options) {

@@ -79,12 +79,10 @@
       .submission-list .submission-detail { position: relative; border-color: var(--line-strong); background: #fbfdff; }
       .submission-list .submission-detail::before { content: ""; position: absolute; left: 26px; top: -7px; width: 12px; height: 12px; transform: rotate(45deg); border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong); background: #fbfdff; }
       .submission-detail[hidden] { display: none; }
-      .detail-head { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-      .detail-thumb { width: 62px; height: 62px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, #effaff, #dff5fa); }
-      .detail-thumb-fallback { display: grid; place-items: center; width: 62px; height: 62px; border: 1px solid var(--line); border-radius: 12px; background: #f1f5f9; color: var(--faint); font-size: 22px; font-weight: 800; }
-      .detail-head-text { min-width: 0; display: grid; gap: 7px; }
-      .detail-head-text h2 { font-size: 18px; overflow-wrap: anywhere; }
-      .submission-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 16px 0 0; padding: 0; }
+      /* 展开区不再重复卡片上已有的缩略图 / 名称 / 状态徽章：一条记录不再在一屏里出现两次，
+         面板只留一个小标题 + 字段表，展开后的高度也少了一大截。 */
+      .detail-eyebrow { margin: 0; color: #0369a1; font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; }
+      .submission-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 12px 0 0; padding: 0; }
       .submission-info .meta-row { min-width: 0; display: grid; gap: 3px; }
       .submission-info .meta-row.span-2 { grid-column: 1 / -1; }
       .submission-info dt { color: var(--muted); font-size: 12px; font-weight: 700; }
@@ -197,13 +195,7 @@
         <section class="submission-detail" id="submission-detail" hidden>
           <div class="detail-clip" id="detail-clip">
             <div class="detail-body">
-              <div class="detail-head">
-                <span id="detail-thumb-slot"></span>
-                <div class="detail-head-text">
-                  <h2 id="detail-name">—</h2>
-                  <span class="status-badge" id="detail-badge"></span>
-                </div>
-              </div>
+              <p class="detail-eyebrow">记录详情</p>
               <dl class="submission-info" id="submission-info"></dl>
               <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
               <form class="standalone-form" id="edit-form" hidden>
@@ -238,6 +230,6 @@
       // Cloudflare Turnstile 的 Site Key 不是秘密值；重新提交和 /submit.html 复用同一个控件。
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submission.js?v=20261011-ui28"></script>
+    <script type="module" src="/submission.js?v=20261011-ui29"></script>
   </body>
 </html>
