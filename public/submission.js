@@ -32,6 +32,11 @@ let currentId = "";
 let currentToken = "";
 let currentStatus = "";
 let knownReferences = [];
+// 列表项的本地缓存：保存/撤回/删除后直接改这里，不再整表重新拉取。
+let currentItems = [];
+let currentSubmission = null;
+// 详情块的渲染签名：同一份数据不重复重建（URL 可能是几十 KB 的 data: 串）。
+let detailSignature = "";
 const TURNSTILE_SITE_KEY = String(window.SUBMISSION_SITE_KEY || "").trim();
 let turnstileToken = "";
 let turnstileWidgetId = null;
@@ -73,11 +78,28 @@ function readSavedSubmissions() {
   }
 }
 
-function saveSubmissionReference(id, token) {
-  const next = readSavedSubmissions().filter((item) => item.id !== id);
-  next.unshift({ id, token });
-  localStorage.setItem("emby-submissions", JSON.stringify(next.slice(0, 30)));
-  localStorage.setItem(tokenStorageKey(id), token);
+// 把当前列表的引用整体写回本地。以前是每加载一条记录就同步写一次 localStorage，
+// 30 条记录会在主线程上写 30 次，首屏明显被拖慢；现在每次加载最多写一次，
+// 内容没变化时直接跳过。
+function persistReferences(items) {
+  const wanted = new Map();
+  for (const item of items.slice(0, 30)) {
+    // 列表项是 { submission, token }，本地引用是 { id, token }，两种形状都认。
+    const id = (item.submission && item.submission.id) || item.id;
+    if (!id || !item.token) continue;
+    wanted.set(id, item.token);
+  }
+  // 一条有效引用都提取不到时什么都不写：宁可保持原状，也不能把已有记录覆盖掉。
+  if (!wanted.size) return;
+  const current = readSavedSubmissions();
+  const unchanged = current.length === wanted.size && current.every((item) => wanted.get(item.id) === item.token);
+  if (unchanged) return;
+  try {
+    localStorage.setItem("emby-submissions", JSON.stringify(Array.from(wanted, ([id, token]) => ({ id, token }))));
+    wanted.forEach((token, id) => localStorage.setItem(tokenStorageKey(id), token));
+  } catch {
+    // 浏览器存储不可用时忽略；刷新后会以服务端结果为准。
+  }
 }
 
 // 删除本地记录：列表条目和单独的 token 键都要清掉，否则下次加载会出现幽灵条目。
@@ -96,11 +118,18 @@ function applyBadge(element, status) {
   element.className = meta.className ? "status-badge " + meta.className : "status-badge";
 }
 
+// 提示条只在真的跑出视口时才补一次最小滚动。以前每次都用 smooth 滚动，
+// 会和展开动画抢合成线程，长列表里保存一次就掉一帧。
 function showResult(message, error = false, target = result) {
   target.hidden = false;
   target.textContent = message;
   target.classList.toggle("error", error);
-  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const viewport = window.innerHeight || document.documentElement.clientHeight || 0;
+  if (!viewport) return;
+  const rect = target.getBoundingClientRect();
+  if (rect.top >= 0 && rect.bottom <= viewport) return;
+  const offset = rect.top < 0 ? rect.top - 24 : rect.bottom - viewport + 24;
+  window.scrollTo({ top: Math.max(window.scrollY + offset, 0), behavior: "auto" });
 }
 
 function formatTime(value) {
@@ -123,7 +152,8 @@ function iconThumb(url, variant) {
     fallback.setAttribute("aria-hidden", "true");
     img.replaceWith(fallback);
   });
-  img.src = url;
+  // 复用卡片节点时先不设 src：空串会被解析成当前页面地址并触发 error 兜底。
+  if (url) img.src = url;
   return img;
 }
 
@@ -201,13 +231,16 @@ function resetTurnstile() {
 }
 
 function markActiveCard(id) {
-  list.querySelectorAll(".submission-card").forEach((card) => {
+  for (const card of list.children) {
+    if (!card.classList.contains("submission-card")) continue;
     const active = card.dataset.id === id;
+    // 状态没变就别碰 DOM：反复写属性会让长列表每选中一次都重排。
+    if ((card.dataset.active === "true") === active) continue;
     card.dataset.active = active ? "true" : "false";
     card.setAttribute("aria-expanded", active ? "true" : "false");
     if (active) card.setAttribute("aria-current", "true");
     else card.removeAttribute("aria-current");
-  });
+  }
 }
 
 function metaRow(label, value, options) {
@@ -223,6 +256,17 @@ function metaRow(label, value, options) {
   return row;
 }
 
+const URL_PREVIEW_LIMIT = 72;
+
+// 图标 URL 常常是几十 KB 的 data: 串。整串塞进文本节点后，换行排版（break-all）
+// 要处理上万个行盒，展开/收起动画每帧都得重排，是这一页最明显的卡顿来源。
+// 这里只显示开头一段，完整值仍由「复制」按钮提供。
+function urlPreview(url) {
+  const text = String(url || "");
+  if (text.length <= URL_PREVIEW_LIMIT) return text;
+  return text.slice(0, URL_PREVIEW_LIMIT) + "…（共 " + text.length.toLocaleString("zh-CN") + " 字符）";
+}
+
 function buildUrlValue(url) {
   const wrap = document.createElement("span");
   wrap.className = "meta-inline";
@@ -231,8 +275,8 @@ function buildUrlValue(url) {
   link.href = url;
   link.target = "_blank";
   link.rel = "noreferrer noopener";
-  link.textContent = url;
-  link.title = url;
+  link.title = "打开图标链接";
+  link.textContent = urlPreview(url);
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "copy-button";
@@ -304,8 +348,23 @@ function renderSubmissionInfo(submission) {
   currentStatus = submission.status;
   detailName.textContent = submission.name;
   applyBadge(detailBadge, submission.status);
-  detailThumbSlot.replaceChildren(iconThumb(submission.url, "detail"));
-  renderMeta(submission);
+  // 同一份数据重复渲染（保存后刷新、重新选中同一条）时不再重建详情块：
+  // 元信息里的 URL 可能是几十 KB 的 data: 串，重建会让面板掉帧。
+  // 用不会出现在字段里的控制字符拼接，避免名称/链接内容互相干扰。
+  const signature = [
+    submission.id,
+    submission.name,
+    submission.status,
+    submission.url,
+    submission.note || "",
+    submission.created_at || "",
+    submission.reviewer_note || "",
+  ].join("\u0001");
+  if (signature !== detailSignature) {
+    detailSignature = signature;
+    detailThumbSlot.replaceChildren(iconThumb(submission.url, "detail"));
+    renderMeta(submission);
+  }
 
   // 待审核可以改；被拒绝/已撤回可以改好后重新提交，所以编辑表单也要露出来。
   const editable = submission.status === "pending";
@@ -332,63 +391,111 @@ function renderSubmissionInfo(submission) {
   // 发布中不允许删除（服务端会拒绝），这里也把入口收起来，避免点了才报错。
   recordActions.hidden = submission.status === "approving";
   if (formVisible) {
-    nameInput.value = submission.name;
-    urlInput.value = submission.url;
-    noteInput.value = submission.note || "";
+    // 只在值真的变了才写回：URL 可能是几十 KB 的 data: 串，反复赋值会重新排版。
+    const note = submission.note || "";
+    if (nameInput.value !== submission.name) nameInput.value = submission.name;
+    if (urlInput.value !== submission.url) urlInput.value = submission.url;
+    if (noteInput.value !== note) noteInput.value = note;
   }
   detail.hidden = false;
 }
 
+// 卡片只创建一次，之后按 id 复用、只更新变化的文案。
+// 以前每次刷新都重建整张卡片，缩略图（data: 串）会被重新解码，长列表里很卡。
+function buildCard() {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "submission-card";
+  card.dataset.active = "false";
+  card.setAttribute("aria-expanded", "false");
+
+  const main = document.createElement("span");
+  main.className = "card-main";
+  const title = document.createElement("span");
+  title.className = "card-title";
+  const sub = document.createElement("span");
+  sub.className = "card-sub";
+  const badge = document.createElement("span");
+  const idText = document.createElement("span");
+  idText.className = "card-id";
+  sub.append(badge, idText);
+  main.append(title, sub);
+
+  const chevron = document.createElement("span");
+  chevron.className = "card-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "›";
+
+  const thumb = iconThumb("", "card");
+  card.append(thumb, main, chevron);
+  card.__thumb = thumb;
+  card.__title = title;
+  card.__badge = badge;
+  card.__idText = idText;
+  card.addEventListener("click", () => {
+    const item = card.__item;
+    if (!item) return;
+    // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
+    if (currentId === item.submission.id && !detail.hidden) {
+      // 收起动画进行中不重复触发，否则要等两次动画跑完才关掉。
+      if (!detailClosing) resetDetailPanel({ animate: true });
+      return;
+    }
+    selectSubmission(item.submission.id, item.token, item.submission);
+  });
+  return card;
+}
+
+function updateCard(card, item) {
+  const { submission } = item;
+  card.__item = item;
+  card.dataset.id = submission.id;
+  card.setAttribute(
+    "aria-label",
+    submission.name + "，状态：" + statusMeta(submission.status).label + "，查看详情",
+  );
+  card.__title.textContent = submission.name;
+  card.__idText.textContent = "#" + String(submission.id).slice(0, 8);
+  applyBadge(card.__badge, submission.status);
+  if (card.__thumbUrl !== submission.url) {
+    card.__thumbUrl = submission.url;
+    const next = iconThumb(submission.url, "card");
+    card.__thumb.replaceWith(next);
+    card.__thumb = next;
+  }
+  return card;
+}
+
+// 按 id 查卡片：比 querySelector 拼字符串更稳（id 来自本地存储，可能带特殊字符）。
+function findCard(id) {
+  for (const node of list.children) {
+    if (node.classList.contains("submission-card") && node.dataset.id === id) return node;
+  }
+  return null;
+}
+
 function renderList(items) {
-  // 详情面板现在住在列表里，重绘前先摘下来，否则会被 replaceChildren 一起清掉。
+  // 详情面板现在住在列表里，重排前先摘下来，否则会被当成列表项处理。
   detail.remove();
-  list.replaceChildren();
+  const reuse = new Map();
+  for (const node of list.children) {
+    if (node.classList.contains("submission-card")) reuse.set(node.dataset.id, node);
+  }
   const hasItems = items.length > 0;
   countValue.textContent = String(items.length);
   countWrap.hidden = !hasItems;
   clearAllWrap.hidden = !hasItems;
   empty.hidden = hasItems;
-  items.forEach(({ submission, token }) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "submission-card";
-    card.dataset.id = submission.id;
-    card.dataset.active = "false";
-    card.setAttribute("aria-expanded", "false");
-    card.setAttribute("aria-label", submission.name + "，状态：" + statusMeta(submission.status).label + "，查看详情");
-
-    const main = document.createElement("span");
-    main.className = "card-main";
-    const title = document.createElement("span");
-    title.className = "card-title";
-    title.textContent = submission.name;
-    const sub = document.createElement("span");
-    sub.className = "card-sub";
-    const badge = document.createElement("span");
-    applyBadge(badge, submission.status);
-    const idText = document.createElement("span");
-    idText.className = "card-id";
-    idText.textContent = "#" + String(submission.id).slice(0, 8);
-    sub.append(badge, idText);
-    main.append(title, sub);
-
-    const chevron = document.createElement("span");
-    chevron.className = "card-chevron";
-    chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = "›";
-
-    card.append(iconThumb(submission.url, "card"), main, chevron);
-    card.addEventListener("click", () => {
-      // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
-      if (currentId === submission.id && !detail.hidden) {
-        // 收起动画进行中不重复触发，否则要等两次动画跑完才关掉。
-        if (!detailClosing) resetDetailPanel({ animate: true });
-        return;
-      }
-      selectSubmission(submission.id, token, submission);
-    });
-    list.append(card);
+  items.forEach((item, index) => {
+    const card = reuse.get(item.submission.id) || buildCard();
+    reuse.delete(item.submission.id);
+    updateCard(card, item);
+    // 位置没变就不动 DOM：整表 insertBefore 等于零成本，只有真换顺序才重排。
+    const at = list.children[index];
+    if (at !== card) list.insertBefore(card, at || null);
   });
+  // 剩下的都是已经被删掉的记录。
+  reuse.forEach((node) => node.remove());
 }
 
 // ---------- 展开/收起动画 ----------
@@ -499,10 +606,11 @@ function selectSubmission(id, token, submission, options) {
   const settings = options || {};
   currentId = id;
   currentToken = token;
+  currentSubmission = submission;
   renderSubmissionInfo(submission);
   markActiveCard(id);
   // 详情面板紧跟被点开的卡片，形成「在记录下面就地展开」的效果。
-  const activeCard = Array.from(list.querySelectorAll(".submission-card")).find((card) => card.dataset.id === id);
+  const activeCard = findCard(id);
   if (activeCard) activeCard.after(detail);
   else list.append(detail);
   // 先停掉上一条记录残留的动画，否则下面量到的是动画中间的高度。
@@ -523,7 +631,6 @@ async function loadOne(reference) {
     status = response.status;
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || "查询失败（" + response.status + "）");
-    saveSubmissionReference(reference.id, reference.token);
     return { submission: body.submission, token: reference.token };
   } catch (error) {
     // 404 说明记录已经不存在（例如在别处删除了），可以安全地清掉本地引用。
@@ -543,6 +650,8 @@ function clearDetailSelection() {
 // 真正隐藏面板本体（收拢动画结束后才调用）。
 function hideDetailPanel() {
   detailClosing = false;
+  // 面板收起来就清掉缓存签名，下次展开同一条记录时会正常重建详情块。
+  detailSignature = "";
   detail.hidden = true;
   editForm.hidden = true;
   recordActions.hidden = true;
@@ -569,7 +678,8 @@ async function loadAll() {
   const references = readSavedSubmissions();
   knownReferences = references;
   if (!references.length) {
-    list.replaceChildren();
+    currentItems = [];
+    renderList([]);
     resetDetailPanel();
     countWrap.hidden = true;
     clearAllWrap.hidden = true;
@@ -584,7 +694,10 @@ async function loadAll() {
   const valid = loaded
     .filter((item) => item.submission)
     .sort((a, b) => submittedAt(b) - submittedAt(a));
+  currentItems = valid;
   renderList(valid);
+  // 本地引用一次性写回，避免每条记录都同步写一次 localStorage。
+  persistReferences(valid.map((item) => ({ id: item.submission.id, token: item.token })));
   // 保存/撤回/重新提交后仍然停留在同一条记录上，只有它消失时才回退到首条。
   const selected =
     valid.find((item) => item.submission.id === currentId) ||
@@ -595,6 +708,41 @@ async function loadAll() {
   else resetDetailPanel();
   const failed = loaded.find((item) => item.error);
   if (failed && !valid.length) showResult("暂时无法读取保存的提交记录，请重新提交或检查浏览器存储。", true);
+}
+
+// 局部刷新：保存、撤回、删除后不再整表重新拉取，直接改本地缓存再重排列表，
+// 省掉一轮全量请求和整表 DOM 重建。
+function replaceItem(submission) {
+  const index = currentItems.findIndex((item) => item.submission.id === submission.id);
+  if (index < 0) {
+    loadAll();
+    return;
+  }
+  const next = currentItems.slice();
+  next[index] = { submission, token: currentItems[index].token };
+  currentItems = next;
+  renderList(currentItems);
+  syncSelection(submission.id);
+}
+
+// 删除本地已不存在的记录：列表里少一条，选中态回退到第一条。
+function dropItem(id) {
+  currentItems = currentItems.filter((item) => item.submission.id !== id);
+  knownReferences = knownReferences.filter((item) => item.id !== id);
+  renderList(currentItems);
+  syncSelection("");
+}
+
+// 列表重排后把详情面板接回当前记录；记录没了就回退到第一条。
+function syncSelection(preferredId) {
+  const wanted = preferredId || currentId;
+  const selected = currentItems.find((item) => item.submission.id === wanted) || currentItems[0];
+  if (!selected) {
+    resetDetailPanel();
+    return;
+  }
+  // 局部刷新不播动画、也不滚动页面，避免保存后整页「呼吸」一下。
+  selectSubmission(selected.submission.id, selected.token, selected.submission, { scroll: false, animate: false });
 }
 
 // 统一的按钮忙碌态：禁用 + 换文案 + 转圈，结束后恢复（或按当前状态重算文案）。
@@ -663,7 +811,9 @@ async function saveSubmission(event) {
           throw new Error(body.error || "保存失败（" + response.status + "）");
         }
         showResult(body.resubmitted ? "已重新提交，等待审核。" : "修改已保存。", false, detailResult);
-        await loadAll();
+        // 服务端响应里已经带着最新记录，直接就地更新，省掉一轮全量请求和整表重建。
+        if (body.submission) replaceItem(body.submission);
+        else await loadAll();
       } catch (error) {
         showResult(error.message, true, detailResult);
       } finally {
@@ -677,16 +827,22 @@ async function saveSubmission(event) {
 }
 
 async function withdrawSubmission() {
+  // 请求期间访客可能点了别的记录，先把目标固定下来。
+  const id = currentId;
+  const token = currentToken;
+  const base = currentSubmission;
   await runAction(withdrawButton, "撤回中…", async () => {
     try {
-      const response = await fetch("/api/submissions/" + encodeURIComponent(currentId), {
+      const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "POST",
-        headers: { "X-Submission-Token": currentToken },
+        headers: { "X-Submission-Token": token },
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "撤回失败（" + response.status + "）");
       showResult("提交已撤回，可修改后重新提交。", false, detailResult);
-      await loadAll();
+      // 撤回只改状态（接口不返回整条记录），本地同步一份即可。
+      if (base) replaceItem({ ...base, id, status: "withdrawn" });
+      else await loadAll();
     } catch (error) {
       showResult(error.message, true, detailResult);
     }
@@ -696,11 +852,12 @@ async function withdrawSubmission() {
 async function deleteSubmission() {
   if (!currentId) return;
   const id = currentId;
+  const token = currentToken;
   await runAction(deleteButton, "删除中…", async () => {
     try {
       const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "DELETE",
-        headers: { "X-Submission-Token": currentToken },
+        headers: { "X-Submission-Token": token },
       });
       // 记录已不存在（404）同样按删除成功处理，否则本地残留永远清不掉。
       if (!response.ok && response.status !== 404) {
@@ -711,7 +868,9 @@ async function deleteSubmission() {
       resetDetailPanel();
       // 删除后面板会关闭，所以结果提示放到列表上方。
       showResult("提交记录已删除。", false, result);
-      await loadAll();
+      // 只从本地列表里摘掉这一条，其它卡片和缩略图都不重建。
+      if (currentItems.some((item) => item.submission.id === id)) dropItem(id);
+      else await loadAll();
     } catch (error) {
       showResult(error.message, true, detailResult);
     }
