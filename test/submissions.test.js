@@ -188,12 +188,13 @@ test("KV success with a failed D1 update never returns the submission to pending
   assert.equal(readKv(env).icons.length, 1);
 });
 
-// 创建一条提交并返回它的访问凭证，供撤回/重新提交/删除用例使用。
-async function createWithToken(env, name, url) {
+// 创建一条提交并返回它的访问凭证，供撤回/重新提交/删除用例使用；
+// 开启 Turnstile 校验的用例需要传入一次性验证令牌。
+async function createWithToken(env, name, url, turnstileToken) {
   const response = await handleSubmissionCreate(
     new Request("https://example.com/api/submissions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(turnstileToken ? { "X-Turnstile-Token": turnstileToken } : {}) },
       body: JSON.stringify({ name, url }),
     }),
     env,
@@ -268,6 +269,58 @@ test("a withdrawn submission can be resubmitted without resubmit-flag errors", a
   assert.equal(env.DB.submissions.get(id).status, "pending");
 });
 
+test("resubmitting a rejected icon requires a valid Turnstile token", async () => {
+  const env = createEnvironment({ turnstileSecret: "turnstile-secret", requireTurnstile: true });
+  const originalFetch = globalThis.fetch;
+  const verified = [];
+  globalThis.fetch = async (url, init) => {
+    verified.push({ url: String(url), body: String(init?.body || "") });
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png", "create-token");
+    await decide(env, id, { action: "reject", note: "名字太随意" });
+    assert.equal(env.DB.submissions.get(id).status, "rejected");
+
+    const resubmit = (headers) =>
+      handleSubmissionItem(
+        ownerRequest(id, token, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ name: "Demo", url: "https://example.com/demo.png", note: "", resubmit: true }),
+        }),
+        env,
+        id,
+      );
+
+    // 没有令牌：拒绝，并且不能改动记录。
+    const denied = await resubmit({});
+    assert.equal(denied.status, 403);
+    assert.match((await denied.json()).error, /turnstile/i);
+    assert.equal(env.DB.submissions.get(id).status, "rejected");
+
+    // 带令牌：放行，并且确实调用了 Cloudflare 的 siteverify。
+    const allowed = await resubmit({ "X-Turnstile-Token": "site-token" });
+    assert.equal(allowed.status, 200);
+    assert.equal(env.DB.submissions.get(id).status, "pending");
+    assert.ok(verified.some((call) => call.url.includes("siteverify") && call.body.includes("response=site-token")));
+
+    // 待审核的普通修改只用访问令牌，不额外要求人机验证。
+    const { id: pendingId, token: pendingToken } = await createWithToken(env, "Other", "https://example.com/other.png", "create-token");
+    const edited = await handleSubmissionItem(
+      ownerRequest(pendingId, pendingToken, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "OtherFixed", url: "https://example.com/other.png", note: "" }),
+      }),
+      env,
+      pendingId,
+    );
+    assert.equal(edited.status, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("editing a resolved submission without the resubmit flag stays rejected", async () => {
   const env = createEnvironment();
   const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");

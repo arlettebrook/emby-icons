@@ -101,7 +101,7 @@ npm test
 - `SUBMISSION_DAILY_LIMIT`：同一 IP 每 24 小时的提交上限，默认 `20`，可按实际使用量调整，最大 `100`。
 - `TURNSTILE_SECRET_KEY`：生产环境建议配置，并将 `REQUIRE_TURNSTILE` 设为 `true`。
 
-Turnstile 的 Site Key 不是秘密值，配置 `TURNSTILE_SECRET_KEY` 后，将 Site Key 填入 `public/submit.html` 中的 `window.SUBMISSION_SITE_KEY`。普通用户提交成功后会得到一次性访问令牌，令牌只保存在当前浏览器，服务端只保存哈希值。
+Turnstile 的 Site Key 不是秘密值，配置 `TURNSTILE_SECRET_KEY` 后，将 Site Key 填入 `public/submit.html` 与 `public/submission.html` 中的 `window.SUBMISSION_SITE_KEY`（两处使用同一个 Site Key）。首次提交和被拒绝/已撤回后的「重新提交审核」都会校验 Turnstile；待审核记录的普通修改、撤回、删除只用访问令牌。普通用户提交成功后会得到一次性访问令牌，令牌只保存在当前浏览器，服务端只保存哈希值。
 
 本地开发可以使用本地 D1：
 

@@ -187,7 +187,7 @@ class FakeD1 {
   }
 }
 
-function createEnvironment({ icons = [], kvUnavailable = false } = {}) {
+function createEnvironment({ icons = [], kvUnavailable = false, turnstileSecret = "", requireTurnstile = false } = {}) {
   const values = new Map();
   const document = { name: "Emby Icons", description: "Test", icons };
   values.set("emby-icons.json", `${JSON.stringify(document, null, 2)}\n`);
@@ -195,6 +195,8 @@ function createEnvironment({ icons = [], kvUnavailable = false } = {}) {
     DB: new FakeD1(),
     ADMIN_TOKEN: "admin-secret",
     SUBMISSION_HASH_SECRET: "test-secret",
+    ...(turnstileSecret ? { TURNSTILE_SECRET_KEY: turnstileSecret } : {}),
+    ...(requireTurnstile ? { REQUIRE_TURNSTILE: "true" } : {}),
     EMBY_ICONS: {
       get: async (key) => (kvUnavailable ? null : values.get(key) ?? null),
       put: async (key, value) => {

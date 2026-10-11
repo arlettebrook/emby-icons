@@ -342,6 +342,10 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
   if (!resubmit || (row.status !== "rejected" && row.status !== "withdrawn")) {
     return jsonResponse(request, env, { error: "Only pending submissions can be edited" }, { status: 409 });
   }
+  // 重新提交会重新进入公共审核队列，所以和首次提交一样要过 Turnstile；
+  // 待审核的普通修改、撤回、删除沿用访问令牌，不额外要求验证。
+  const turnstileError = await verifyTurnstile(request, env, body);
+  if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
 
   const reset = await env.DB
     .prepare(

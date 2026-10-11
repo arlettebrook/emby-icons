@@ -23,11 +23,21 @@ const detailResult = document.querySelector("#detail-result");
 const clearAllWrap = document.querySelector("#submission-clear");
 const clearAllButton = document.querySelector("#clear-all-button");
 const clearAllCancel = document.querySelector("#clear-all-cancel");
+const detailClip = document.querySelector("#detail-clip");
+const detailTurnstile = document.querySelector("#detail-turnstile");
+const turnstileContainer = document.querySelector("#turnstile-container");
+const turnstileError = document.querySelector("#turnstile-error");
 const queryId = new URLSearchParams(window.location.search).get("id");
 let currentId = "";
 let currentToken = "";
 let currentStatus = "";
 let knownReferences = [];
+const TURNSTILE_SITE_KEY = String(window.SUBMISSION_SITE_KEY || "").trim();
+let turnstileToken = "";
+let turnstileWidgetId = null;
+let turnstileScriptState = "idle";
+let turnstileFailed = false;
+let detailAnimation = null;
 
 const STATUS_META = {
   pending: { label: "待审核", className: "pending" },
@@ -117,10 +127,84 @@ function iconThumb(url, variant) {
   return img;
 }
 
+// ---------- Cloudflare Turnstile：重新提交和 /submit.html 走同一套校验 ----------
+function turnstileEnabled() {
+  return Boolean(TURNSTILE_SITE_KEY);
+}
+
+function setTurnstileError(message) {
+  if (!turnstileError) return;
+  turnstileError.textContent = message || "";
+  turnstileError.hidden = !message;
+}
+
+function loadTurnstileScript() {
+  if (!turnstileEnabled() || turnstileScriptState !== "idle") return;
+  turnstileScriptState = "loading";
+  const script = document.createElement("script");
+  script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  script.async = true;
+  script.onload = () => {
+    turnstileScriptState = window.turnstile ? "ready" : "failed";
+    if (turnstileScriptState === "failed") setTurnstileError("人机验证加载失败，请刷新页面后重试。");
+    mountTurnstile();
+  };
+  script.onerror = () => {
+    turnstileScriptState = "failed";
+    setTurnstileError("人机验证加载失败，请检查网络后重试。");
+  };
+  document.head.append(script);
+}
+
+// 控件只在需要时挂载，且必须等容器可见，否则 Turnstile 量不到尺寸。
+function mountTurnstile() {
+  if (!turnstileEnabled() || turnstileScriptState !== "ready" || turnstileWidgetId !== null) return;
+  if (!turnstileContainer || detailTurnstile?.hidden) return;
+  try {
+    turnstileWidgetId = window.turnstile.render(turnstileContainer, {
+      sitekey: TURNSTILE_SITE_KEY,
+      // 令牌 300 秒后过期，允许控件在过期时自动重新签发。
+      "refresh-expired": "auto",
+      callback: (token) => {
+        turnstileToken = token;
+        turnstileFailed = false;
+        setTurnstileError("");
+      },
+      "expired-callback": () => {
+        turnstileToken = "";
+      },
+      "error-callback": () => {
+        // 页面环境（例如部分 WebView）拿不到验证令牌时不要卡死：放行给服务端判定。
+        turnstileToken = "";
+        turnstileFailed = true;
+        setTurnstileError("人机验证未能完成，可再试一次；若一直失败，请换浏览器或稍后再提交。");
+      },
+    });
+  } catch {
+    turnstileFailed = true;
+    setTurnstileError("人机验证初始化失败，请刷新页面后重试。");
+  }
+}
+
+// 令牌是一次性的：每次重新提交（无论成功还是失败）后都要重置控件，
+// 否则控件会停在旧结果上、不再签发新令牌，导致下一次提交验证失效。
+function resetTurnstile() {
+  turnstileToken = "";
+  setTurnstileError("");
+  try {
+    if (window.turnstile && turnstileWidgetId !== null && turnstileWidgetId !== undefined) {
+      window.turnstile.reset(turnstileWidgetId);
+    }
+  } catch {
+    // 忽略：下一次重新提交时要求访客重新完成验证即可。
+  }
+}
+
 function markActiveCard(id) {
   list.querySelectorAll(".submission-card").forEach((card) => {
     const active = card.dataset.id === id;
     card.dataset.active = active ? "true" : "false";
+    card.setAttribute("aria-expanded", active ? "true" : "false");
     if (active) card.setAttribute("aria-current", "true");
     else card.removeAttribute("aria-current");
   });
@@ -231,6 +315,20 @@ function renderSubmissionInfo(submission) {
   saveButton.textContent = editable ? "保存修改" : "重新提交审核";
   withdrawButton.hidden = !editable;
   resubmitHint.hidden = !resubmittable;
+  // 重新提交要在服务端过 Cloudflare Turnstile，和 /submit.html 保持一致；
+  // 只有被拒绝/已撤回的记录会走到这里，待审核的「保存修改」不需要验证。
+  const needsTurnstile = resubmittable && turnstileEnabled();
+  detailTurnstile.hidden = !needsTurnstile;
+  if (needsTurnstile) {
+    // 换一条记录就换一份令牌：Turnstile 的令牌是一次性的。
+    resetTurnstile();
+    loadTurnstileScript();
+    mountTurnstile();
+  } else {
+    turnstileToken = "";
+    turnstileFailed = false;
+    setTurnstileError("");
+  }
   // 发布中不允许删除（服务端会拒绝），这里也把入口收起来，避免点了才报错。
   recordActions.hidden = submission.status === "approving";
   if (formVisible) {
@@ -256,6 +354,7 @@ function renderList(items) {
     card.className = "submission-card";
     card.dataset.id = submission.id;
     card.dataset.active = "false";
+    card.setAttribute("aria-expanded", "false");
     card.setAttribute("aria-label", submission.name + "，状态：" + statusMeta(submission.status).label + "，查看详情");
 
     const main = document.createElement("span");
@@ -282,13 +381,118 @@ function renderList(items) {
     card.addEventListener("click", () => {
       // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
       if (currentId === submission.id && !detail.hidden) {
-        resetDetailPanel();
+        // 收起动画进行中不重复触发，否则要等两次动画跑完才关掉。
+        if (!detailClosing) resetDetailPanel({ animate: true });
         return;
       }
       selectSubmission(submission.id, token, submission);
     });
     list.append(card);
   });
+}
+
+// ---------- 展开/收起动画 ----------
+const DETAIL_ANIM_MS = 240;
+const DETAIL_CLOSE_MS = DETAIL_ANIM_MS - 60;
+let detailCloseTimer = 0;
+let detailClosing = false;
+
+function prefersReducedMotion() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function canAnimateDetail() {
+  return Boolean(detailClip) && typeof detailClip.animate === "function" && !prefersReducedMotion();
+}
+
+// 立刻停掉进行中的展开/收起：换记录时先归位，量到的才是自然高度。
+function stopDetailAnimation() {
+  if (detailCloseTimer) {
+    window.clearTimeout(detailCloseTimer);
+    detailCloseTimer = 0;
+  }
+  detailClosing = false;
+  if (detailAnimation) {
+    try {
+      detailAnimation.cancel();
+    } catch {
+      // 忽略：动画可能已经自己结束。
+    }
+    detailAnimation = null;
+  }
+}
+
+// 展开：高度从 0 撑开 + 轻微上移淡入，让「在记录下方就地展开」有个可感知的过程。
+function playDetailOpen() {
+  if (!canAnimateDetail()) return;
+  const height = detailClip.scrollHeight;
+  if (!height) return;
+  stopDetailAnimation();
+  detailAnimation = detailClip.animate(
+    [
+      { height: "0px", opacity: 0, transform: "translateY(-6px)" },
+      { height: height + "px", opacity: 1, transform: "translateY(0)" },
+    ],
+    { duration: DETAIL_ANIM_MS, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)" },
+  );
+  // fill 保持默认的 none：动画结束后高度自动回到 CSS 的 auto，
+  // 之后再出现提示文案（例如保存结果）也不会被裁掉。
+  detailAnimation.finished.catch(() => {});
+}
+
+// 收起：先把高度收回 0 再真正隐藏，避免面板突然消失；被取消时（例如马上点了别的记录）不再收回。
+function playDetailClose(done) {
+  if (!canAnimateDetail()) {
+    done();
+    return;
+  }
+  const height = detailClip.scrollHeight;
+  if (!height) {
+    done();
+    return;
+  }
+  stopDetailAnimation();
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    if (detailCloseTimer) {
+      window.clearTimeout(detailCloseTimer);
+      detailCloseTimer = 0;
+    }
+    detailAnimation = null;
+    detailClosing = false;
+    done();
+  };
+  const animation = detailClip.animate(
+    [
+      { height: height + "px", opacity: 1 },
+      { height: "0px", opacity: 0 },
+    ],
+    { duration: DETAIL_CLOSE_MS, easing: "ease-in" },
+  );
+  detailAnimation = animation;
+  detailClosing = true;
+  // 后台标签页、无头浏览器里 finished 可能迟迟不 resolve，这里用定时器兜底，
+  // 保证面板一定会被收起，不会卡在「半开着」的状态。
+  detailCloseTimer = window.setTimeout(settle, DETAIL_CLOSE_MS + 90);
+  animation.finished.then(settle).catch(() => {});
+}
+
+// 展开后如果面板底部被视口截断，就向上滚「刚好够用」的距离；已经完全可见时不动页面，
+// 避免「每次点开都跳到最下面」，也避免长面板把所属卡片推出屏幕。
+function revealDetail(activeCard) {
+  if (!activeCard) return;
+  const viewport = window.innerHeight || document.documentElement.clientHeight || 0;
+  if (!viewport) return;
+  const margin = 16;
+  const rect = detail.getBoundingClientRect();
+  const overflow = rect.bottom - (viewport - margin);
+  if (overflow <= 0) return;
+  const limit = Math.max(window.scrollY + rect.top - margin, 0);
+  const target = Math.min(window.scrollY + overflow, limit);
+  if (Math.abs(target - window.scrollY) < 4) return;
+  window.scrollTo({ top: target, behavior: "smooth" });
 }
 
 function selectSubmission(id, token, submission, options) {
@@ -301,7 +505,12 @@ function selectSubmission(id, token, submission, options) {
   const activeCard = Array.from(list.querySelectorAll(".submission-card")).find((card) => card.dataset.id === id);
   if (activeCard) activeCard.after(detail);
   else list.append(detail);
-  if (settings.scroll !== false) detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  // 先停掉上一条记录残留的动画，否则下面量到的是动画中间的高度。
+  stopDetailAnimation();
+  // 先按完整高度决定要不要滚动，再播展开动画，否则动画期间的 0 高度会让判断失真。
+  if (settings.scroll !== false) revealDetail(activeCard);
+  if (settings.animate === false) return;
+  playDetailOpen();
 }
 
 async function loadOne(reference) {
@@ -322,17 +531,38 @@ async function loadOne(reference) {
   }
 }
 
-function resetDetailPanel() {
+// 清掉当前选中态（高亮、待确认按钮、当前记录信息）。
+function clearDetailSelection() {
   resetConfirmFlows();
   currentId = "";
   currentToken = "";
   currentStatus = "";
+  markActiveCard("");
+}
+
+// 真正隐藏面板本体（收拢动画结束后才调用）。
+function hideDetailPanel() {
+  detailClosing = false;
   detail.hidden = true;
   editForm.hidden = true;
   recordActions.hidden = true;
   detailResult.hidden = true;
   detailThumbSlot.replaceChildren();
-  markActiveCard("");
+}
+
+function resetDetailPanel(options) {
+  const animate = options?.animate === true && !detail.hidden && !detailClosing;
+  if (animate) {
+    // 收起动画期间先留着卡片高亮，等面板真正收完再清掉，收起过程更连贯。
+    playDetailClose(() => {
+      clearDetailSelection();
+      hideDetailPanel();
+    });
+    return;
+  }
+  stopDetailAnimation();
+  clearDetailSelection();
+  hideDetailPanel();
 }
 
 async function loadAll() {
@@ -360,7 +590,8 @@ async function loadAll() {
     valid.find((item) => item.submission.id === currentId) ||
     valid.find((item) => item.submission.id === queryId) ||
     valid[0];
-  if (selected) selectSubmission(selected.submission.id, selected.token, selected.submission, { scroll: false });
+  // 列表刷新触发的选中不播展开动画，避免每次保存/删除后整页「呼吸」一下。
+  if (selected) selectSubmission(selected.submission.id, selected.token, selected.submission, { scroll: false, animate: false });
   else resetDetailPanel();
   const failed = loaded.find((item) => item.error);
   if (failed && !valid.length) showResult("暂时无法读取保存的提交记录，请重新提交或检查浏览器存储。", true);
@@ -384,14 +615,23 @@ async function runAction(button, busyLabel, action, finalLabel) {
 
 async function saveSubmission(event) {
   event.preventDefault();
+  const resubmitting = currentStatus !== "pending";
   const payload = {
     name: nameInput.value,
     url: urlInput.value,
     note: noteInput.value,
   };
   // 非待审核的记录走「重新提交」：服务端会把它改回待审核队列并重新通知审核人。
-  if (currentStatus !== "pending") payload.resubmit = true;
-  const busyLabel = currentStatus === "pending" ? "保存中…" : "重新提交中…";
+  if (resubmitting) payload.resubmit = true;
+  // 重新提交和 /submit.html 一样要过 Cloudflare 人机验证；
+  // 控件没渲染出来（脚本被拦等）时不拦本地提交，交给服务端判定。
+  const verifying = resubmitting && turnstileEnabled() && turnstileWidgetId !== null;
+  if (verifying && !turnstileFailed && !turnstileToken) {
+    showResult("请先完成上方的人机验证，再点「重新提交审核」。", true, detailResult);
+    detailTurnstile.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+  const busyLabel = resubmitting ? "重新提交中…" : "保存中…";
   await runAction(
     saveButton,
     busyLabel,
@@ -400,17 +640,36 @@ async function saveSubmission(event) {
       try {
         const response = await fetch("/api/submissions/" + encodeURIComponent(currentId), {
           method: "PATCH",
-          headers: { "Content-Type": "application/json", "X-Submission-Token": currentToken },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Submission-Token": currentToken,
+            ...(verifying && turnstileToken ? { "X-Turnstile-Token": turnstileToken } : {}),
+          },
           body: JSON.stringify(payload),
         });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || "保存失败（" + response.status + "）");
+        if (!response.ok) {
+          if (/turnstile/i.test(String(body.error || ""))) {
+            // 令牌过期或已被用过：刷新控件，让访客重新完成验证再提交。
+            resetTurnstile();
+            // 控件压根没挂上（脚本被拦、WebView 不支持）时给出能照做的提示，避免反复重试。
+            const hint =
+              turnstileWidgetId === null
+                ? "人机验证未加载成功，请刷新页面后重试，或换用浏览器打开。"
+                : "Cloudflare 人机验证已失效，已刷新验证，请重新完成后再次提交。";
+            showResult(hint, true, detailResult);
+            return;
+          }
+          throw new Error(body.error || "保存失败（" + response.status + "）");
+        }
         showResult(body.resubmitted ? "已重新提交，等待审核。" : "修改已保存。", false, detailResult);
         await loadAll();
       } catch (error) {
         showResult(error.message, true, detailResult);
       } finally {
         withdrawButton.disabled = false;
+        // 令牌一次性：无论成功失败都重置控件，下次提交需要重新验证。
+        if (verifying) resetTurnstile();
       }
     },
     () => (currentStatus === "pending" ? "保存修改" : "重新提交审核"),

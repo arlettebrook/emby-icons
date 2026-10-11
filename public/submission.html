@@ -42,7 +42,9 @@
       .card-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
       .card-id { overflow: hidden; color: var(--faint); font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
       .card-chevron { flex: 0 0 auto; color: var(--faint); font-size: 22px; line-height: 1; transition: color 150ms ease, transform 150ms ease; }
-      .submission-card:hover .card-chevron, .submission-card[data-active="true"] .card-chevron { color: var(--accent-strong); transform: translateX(2px); }
+      .submission-card:hover .card-chevron { color: var(--accent-strong); transform: translateX(2px); }
+      /* 展开态箭头转 90°，提示再点一次即可收起。 */
+      .submission-card[data-active="true"] .card-chevron { color: var(--accent-strong); transform: rotate(90deg); }
 
       /* 状态标签 */
       .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 720; white-space: nowrap; }
@@ -60,7 +62,10 @@
       .submission-empty-text { font-size: 13px; }
 
       /* 详情面板 */
-      .submission-detail { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; box-shadow: 0 12px 30px rgb(15 23 42 / 6%); }
+      .submission-detail { padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #ffffff; box-shadow: 0 12px 30px rgb(15 23 42 / 6%); }
+      /* 展开/收起动画作用在内层裁剪容器上，外层保留边框和指向卡片的小尖角。 */
+      .detail-clip { overflow: hidden; border-radius: inherit; }
+      .detail-body { padding: 18px; }
       /* 内联在记录卡片下面时，用一个小尖角指向所属卡片。 */
       .submission-list .submission-detail { position: relative; border-color: var(--line-strong); background: #fbfdff; }
       .submission-list .submission-detail::before { content: ""; position: absolute; left: 26px; top: -7px; width: 12px; height: 12px; transform: rotate(45deg); border-top: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong); background: #fbfdff; }
@@ -89,6 +94,10 @@
       .form-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
       .form-note[hidden] { display: none; }
       .form-note.accent { padding: 10px 12px; border: 1px solid rgb(56 189 248 / 40%); border-radius: 8px; background: #effaff; color: #0369a1; }
+      .turnstile-box { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfd; }
+      .turnstile-box[hidden] { display: none; }
+      .turnstile-box .form-note.error { color: var(--danger); font-weight: 700; }
+      #turnstile-container { min-height: 65px; }
 
       /* 操作按钮 */
       .submission-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -171,36 +180,49 @@
         </div>
 
         <section class="submission-detail" id="submission-detail" hidden>
-          <div class="detail-head">
-            <span id="detail-thumb-slot"></span>
-            <div class="detail-head-text">
-              <h2 id="detail-name">—</h2>
-              <span class="status-badge" id="detail-badge"></span>
+          <div class="detail-clip" id="detail-clip">
+            <div class="detail-body">
+              <div class="detail-head">
+                <span id="detail-thumb-slot"></span>
+                <div class="detail-head-text">
+                  <h2 id="detail-name">—</h2>
+                  <span class="status-badge" id="detail-badge"></span>
+                </div>
+              </div>
+              <dl class="submission-info" id="submission-info"></dl>
+              <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
+              <form class="standalone-form" id="edit-form" hidden>
+                <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
+                <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
+                <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
+                <p class="form-note accent" id="resubmit-hint" hidden>改好名称、链接和说明后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
+                <div class="turnstile-box" id="detail-turnstile" hidden>
+                  <p class="form-note">重新提交与首次提交一样需要通过 Cloudflare 人机验证，验证只用于拦截批量提交。</p>
+                  <div id="turnstile-container"></div>
+                  <p class="form-note error" id="turnstile-error" hidden></p>
+                </div>
+                <div class="submission-actions">
+                  <button class="button button-primary" id="save-button" type="submit">保存修改</button>
+                  <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
+                  <button class="button button-secondary" id="withdraw-cancel" type="button" hidden>取消撤回</button>
+                </div>
+              </form>
+              <div class="submission-actions submission-danger" id="record-actions" hidden>
+                <p class="form-note">删除后本页面不再显示该记录；仍在待审核的提交会一并从队列移除，且无法恢复。如果已经发布，图标本身不会被下架。</p>
+                <button class="button button-danger" id="delete-button" type="button">删除记录</button>
+                <button class="button button-secondary" id="delete-cancel" type="button" hidden>取消</button>
+              </div>
             </div>
-          </div>
-          <dl class="submission-info" id="submission-info"></dl>
-          <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
-          <form class="standalone-form" id="edit-form" hidden>
-            <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
-            <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
-            <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
-            <p class="form-note accent" id="resubmit-hint" hidden>改好名称、链接和说明后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
-            <div class="submission-actions">
-              <button class="button button-primary" id="save-button" type="submit">保存修改</button>
-              <button class="button button-secondary" id="withdraw-button" type="button">撤回提交</button>
-              <button class="button button-secondary" id="withdraw-cancel" type="button" hidden>取消撤回</button>
-            </div>
-          </form>
-          <div class="submission-actions submission-danger" id="record-actions" hidden>
-            <p class="form-note">删除后本页面不再显示该记录；仍在待审核的提交会一并从队列移除，且无法恢复。如果已经发布，图标本身不会被下架。</p>
-            <button class="button button-danger" id="delete-button" type="button">删除记录</button>
-            <button class="button button-secondary" id="delete-cancel" type="button" hidden>取消</button>
           </div>
         </section>
 
         <div class="standalone-links"><a class="button button-primary" href="/submit.html">提交新的图标</a><a class="button button-secondary" href="/">返回主页</a></div>
       </section>
     </main>
-    <script type="module" src="/submission.js?v=20261010-ui24"></script>
+    <script>
+      // Cloudflare Turnstile 的 Site Key 不是秘密值；重新提交和 /submit.html 复用同一个控件。
+      window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
+    </script>
+    <script type="module" src="/submission.js?v=20261011-ui26"></script>
   </body>
 </html>
