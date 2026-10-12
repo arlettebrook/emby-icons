@@ -39,38 +39,30 @@
       .submission-list { display: grid; gap: 10px; margin-top: 22px; }
       /* content-visibility：记录多时跳过视口外卡片的渲染，长列表滚动更轻。
          contain-intrinsic-size 写的是内容盒高度，卡片的内边距和边框会另外加上：
-         50px 内容盒 + 26px(移动)/28px(桌面) = 实测的 76px/78px 卡片高度。
+         桌面 50px + 28px = 78px 卡片，手机 86px + 26px = 112px（按钮另起一行）。
          占位高度必须和真实高度一致，否则滚动中卡片陆续渲染时页面会变矮、滚动位置被弹回。 */
       .submission-card { position: relative; width: 100%; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; color: inherit; font: inherit; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 50px; transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
       .submission-card:active { transform: translateY(0); }
-      /* 卡片本身不是 <button>：右上角要放删除/更多按钮，嵌套 button 既非法也会互相抢点击。
+      /* 卡片本身不是 <button>：右侧要放查看/编辑/撤回/删除按钮，嵌套 button 既非法也会互相抢点击。
          「点整行展开/收起」改由一层铺满整行的透明按钮（.card-hit）承接，正文不参与命中测试。 */
       .card-hit { position: absolute; inset: 0; z-index: 0; padding: 0; border: 0; border-radius: 12px; background: transparent; cursor: pointer; }
       .card-hit:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
       .card-thumb, .card-main, .card-tail { position: relative; z-index: 1; pointer-events: none; }
-      /* 卡片右上角操作区：删除常驻（发布中除外），其余操作收进「更多」菜单。 */
-      .card-tail { display: flex; align-items: center; gap: 5px; }
-      .card-action { pointer-events: auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0; border: 1px solid var(--line-strong); border-radius: 9px; background: #ffffff; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; line-height: 1; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease; }
+      /* 卡片右侧操作区：查看/编辑/撤回/删除全部平铺在卡片上，不再收进「⋯」菜单——
+         少一层展开才知道「这条记录还能做什么」，也少一份要跟着状态同步的开关。 */
+      .card-tail { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+      .card-action { pointer-events: auto; height: 34px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: #ffffff; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease; }
       .card-action[hidden] { display: none; }
-      .card-action .icon { display: block; }
-      /* 小按钮平时只有图标；进入待确认/请求中才把文字露出来，兼作状态提示。 */
-      .card-action .button-label { display: none; white-space: nowrap; }
+      /* 当前展开的记录：同一颗「查看」就地变成「收起」，位置不跳，也说明再点一次会合上。 */
+      .card-action-view[aria-expanded="true"] { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
+      /* 「编辑提交 / 编辑并重新提交」是这条记录最该做的事（被拒绝/已撤回时更是唯一出路），用强调色点出来。 */
+      .card-action-edit { border-color: rgb(56 189 248 / 55%); background: var(--accent-soft); color: #0369a1; }
       .card-action-danger { color: #be123c; }
+      /* 防误触：删除第一次点击只是「上膛」并把文案换成「确认删除」，再点一次才真的删。 */
       .card-action-danger[data-confirm="true"],
-      .card-action-danger[data-busy="true"] { width: auto; padding: 0 11px; border-color: rgb(225 29 72 / 55%); background: #fff1f2; }
-      .card-action-danger[data-confirm="true"] .button-label,
-      .card-action-danger[data-busy="true"] .button-label { display: inline; }
+      .card-action-danger[data-busy="true"] { border-color: rgb(225 29 72 / 55%); background: #fff1f2; }
       .card-action-danger[data-confirm="true"] { box-shadow: 0 0 0 3px rgb(225 29 72 / 14%); }
-      .card-action[data-busy="true"],
-      .card-menu-item[data-busy="true"] { cursor: progress; opacity: 0.8; }
-      .card-action[aria-expanded="true"] { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
-      /* 被拒绝/已撤回的记录，「⋯」是「改好重新提交」的唯一入口，给它一点强调色。 */
-      .card-action[data-primary="true"] { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
-      /* 「更多」菜单内联展开在卡片里，不用浮层：不会被裁掉，也不会被顶出屏幕。 */
-      .card-menu { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px dashed var(--line-strong); position: relative; z-index: 1; pointer-events: auto; }
-      .card-menu[hidden] { display: none; }
-      .card-menu-item[hidden] { display: none; }
-      .card-menu-item { pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 108px; gap: 6px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: #ffffff; color: var(--ink); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease; }
+      .card-action[data-busy="true"] { cursor: progress; opacity: 0.8; }
       .submission-card[data-active="true"] { border-color: var(--accent-strong); box-shadow: 0 0 0 1px rgb(56 189 248 / 42%), 0 14px 30px rgb(14 165 233 / 13%); }
       .submission-card[data-active="true"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent-strong); }
       .card-thumb { width: 46px; height: 46px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(145deg, #effaff, #dff5fa); }
@@ -79,9 +71,6 @@
       .card-title { overflow: hidden; color: #0f172a; font-size: 16px; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
       .card-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
       .card-id { overflow: hidden; color: var(--faint); font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-      .card-chevron { flex: 0 0 auto; color: var(--faint); font-size: 22px; line-height: 1; transition: color 150ms ease, transform 150ms ease; }
-      /* 展开态箭头转 90°，提示再点一次即可收起。 */
-      .submission-card[data-active="true"] .card-chevron { color: var(--accent-strong); transform: rotate(90deg); }
 
       /* 状态标签 */
       .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 720; white-space: nowrap; }
@@ -113,6 +102,12 @@
       .submission-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 12px 0 0; padding: 0; }
       .submission-info .meta-row { min-width: 0; display: grid; gap: 3px; }
       .submission-info .meta-row.span-2 { grid-column: 1 / -1; }
+      /* 编辑态顶部的小横条：状态 · 提交时间 · 编号，一行读完就去改表单，
+         不像只读态那样按字段表铺开（名称和链接已经在表单里，铺开就是重复）。 */
+      .meta-strip { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; color: var(--muted); font-size: 12px; }
+      .meta-strip-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: #ffffff; color: var(--ink); font-weight: 700; }
+      .meta-strip-id { color: var(--faint); font-family: "Cascadia Code", Consolas, monospace; }
+      .meta-strip-sep { color: var(--line-strong); }
       .submission-info dt { color: var(--muted); font-size: 12px; font-weight: 700; }
       .submission-info dd { margin: 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
       .meta-inline { display: flex; align-items: center; gap: 8px; }
@@ -123,12 +118,10 @@
          展开详情时白掉帧；只在真有指针悬停的设备上启用这些效果。 */
       @media (hover: hover) and (pointer: fine) {
         .submission-card:hover { border-color: var(--accent-strong); box-shadow: 0 12px 28px rgb(14 165 233 / 12%); transform: translateY(-1px); }
-        .submission-card:hover .card-chevron { color: var(--accent-strong); transform: translateX(2px); }
         .meta-link:hover { text-decoration: underline; }
         .copy-button:hover { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
         .card-action:not([hidden]):hover { border-color: var(--accent-strong); color: #0369a1; }
         .card-action-danger:not([hidden]):hover { border-color: rgb(225 29 72 / 55%); background: #fff1f2; color: #9f1239; }
-        .card-menu-item:hover { border-color: var(--accent-strong); background: var(--accent-soft); color: #0369a1; }
       }
 
       /* 编辑表单 */
@@ -176,11 +169,14 @@
         .submission-hero-side { width: 100%; justify-content: space-between; }
         .submission-count { justify-self: start; }
         .submission-info { grid-template-columns: 1fr; }
-        .submission-card { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; padding: 12px; }
+        .submission-card { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; padding: 12px; contain-intrinsic-size: auto 86px; }
         .card-thumb, .card-thumb-fallback { width: 40px; height: 40px; }
-        .card-action { width: 32px; height: 32px; }
-        .card-tail { gap: 4px; }
-        .card-menu-item { flex: 1 1 auto; justify-content: center; }
+        /* 手机上四个按钮挤不进右侧那一列：整组移到卡片下方铺满一行，
+           每个动作都仍然留在明面上，不需要点开「⋯」才知道能做什么。 */
+        .card-tail { grid-column: 1 / -1; }
+        .card-action { flex: 1 1 auto; height: 36px; }
+        /* 只剩「查看」一个按钮时不要拉满整行，右对齐放着就行。 */
+        .card-action:only-child { flex: 0 0 auto; }
         .submission-actions { display: grid; grid-template-columns: 1fr; }
         .submission-actions .button { width: 100%; min-height: 44px; }
         .standalone-links { display: grid; grid-template-columns: 1fr; }
@@ -208,7 +204,7 @@
           <div>
             <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
             <h1>我的提交</h1>
-            <p class="submission-lede">当前浏览器会自动保存你的提交记录。点开记录查看审核详情；要改内容或重新提交，点卡片右上角的「⋯」；删除记录是它左边的按钮，点两次才会删。</p>
+            <p class="submission-lede">当前浏览器会自动保存你的提交记录。点卡片上的「查看」展开审核详情；要改内容或重新提交，点同一行的「编辑提交」；删除要点两次才会生效。</p>
           </div>
           <div class="submission-hero-side">
             <div class="submission-clear" id="submission-clear" hidden>
@@ -234,9 +230,9 @@
               <p class="detail-eyebrow" id="detail-eyebrow">记录详情</p>
               <dl class="submission-info" id="submission-info"></dl>
               <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
-              <!-- 表单只在点开卡片菜单里的「编辑/重新提交」时才展开；默认这里是只读详情。 -->
+              <!-- 表单只在点卡片上的「编辑提交 / 编辑并重新提交」时才展开；默认这里是只读详情。 -->
               <form class="standalone-form" id="edit-form" hidden>
-                <p class="form-note" id="edit-hint" hidden>当前是待审核记录，直接改名称、链接或说明，改好点「保存修改」；点「取消」放弃本次改动。撤回和删除在卡片右上角。</p>
+                <p class="form-note" id="edit-hint" hidden>当前是待审核记录，直接改名称、链接或说明，改好点「保存修改」；点「取消」放弃本次改动。撤回和删除在卡片右侧。</p>
                 <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
                 <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
                 <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
@@ -262,6 +258,6 @@
       // Cloudflare Turnstile 的 Site Key 不是秘密值；重新提交和 /submit.html 复用同一个控件。
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submission.js?v=20261012-ui30"></script>
+    <script type="module" src="/submission.js?v=20261012-ui32"></script>
   </body>
 </html>
