@@ -9,11 +9,9 @@ const nameInput = document.querySelector("#edit-name");
 const urlInput = document.querySelector("#edit-url");
 const noteInput = document.querySelector("#edit-note");
 const saveButton = document.querySelector("#save-button");
-const withdrawButton = document.querySelector("#withdraw-button");
-const withdrawCancel = document.querySelector("#withdraw-cancel");
-const deleteButton = document.querySelector("#delete-button");
-const deleteCancel = document.querySelector("#delete-cancel");
-const recordActions = document.querySelector("#record-actions");
+const cancelEdit = document.querySelector("#cancel-edit");
+const detailEyebrow = document.querySelector("#detail-eyebrow");
+const editHint = document.querySelector("#edit-hint");
 const resubmitHint = document.querySelector("#resubmit-hint");
 const result = document.querySelector("#result");
 const detailResult = document.querySelector("#detail-result");
@@ -32,6 +30,9 @@ let knownReferences = [];
 // 列表项的本地缓存：保存/撤回/删除后直接改这里，不再整表重新拉取。
 let currentItems = [];
 let currentSubmission = null;
+// 详情面板默认只读：只有从卡片菜单进入「编辑/重新提交」时才展开表单，
+// 这样日常查看不会误改，也省掉每开一条记录就重建表单和验证控件的开销。
+let editMode = false;
 // 详情块的渲染签名：同一份数据不重复重建（URL 可能是几十 KB 的 data: 串）。
 let detailSignature = "";
 const TURNSTILE_SITE_KEY = String(window.SUBMISSION_SITE_KEY || "").trim();
@@ -39,6 +40,9 @@ let turnstileToken = "";
 let turnstileWidgetId = null;
 let turnstileScriptState = "idle";
 let turnstileFailed = false;
+// 已经为哪条记录挂好验证控件：同一条记录重复渲染时不重置控件，
+// 否则访客刚做完验证、一次重渲染就会把令牌清掉。
+let turnstileRecordId = "";
 let detailAnimation = null;
 
 const STATUS_META = {
@@ -127,6 +131,27 @@ function showResult(message, error = false, target = result) {
   if (rect.top >= 0 && rect.bottom <= viewport) return;
   const offset = rect.top < 0 ? rect.top - 24 : rect.bottom - viewport + 24;
   window.scrollTo({ top: Math.max(window.scrollY + offset, 0), behavior: "auto" });
+}
+
+// 卡片上的操作（删除、撤回）离列表顶部的结果条很远，反馈改用贴近底部的浮层提示。
+let toastNode = null;
+let toastTimer = 0;
+
+function showToast(message, error) {
+  if (!toastNode) {
+    toastNode = document.createElement("div");
+    toastNode.className = "toast";
+    toastNode.setAttribute("role", "status");
+    toastNode.setAttribute("aria-live", "polite");
+    document.body.append(toastNode);
+  }
+  toastNode.textContent = message || "";
+  toastNode.classList.toggle("error", error === true);
+  toastNode.dataset.open = "true";
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastNode.dataset.open = "false";
+  }, 2400);
 }
 
 function formatTime(value) {
@@ -234,9 +259,10 @@ function markActiveCard(id) {
     // 状态没变就别碰 DOM：反复写属性会让长列表每选中一次都重排。
     if ((card.dataset.active === "true") === active) continue;
     card.dataset.active = active ? "true" : "false";
-    card.setAttribute("aria-expanded", active ? "true" : "false");
-    if (active) card.setAttribute("aria-current", "true");
-    else card.removeAttribute("aria-current");
+    // 展开态挂在承接点击的那个按钮上：卡片本体是普通容器，挂上去读屏不会播报。
+    card.__hit.setAttribute("aria-expanded", active ? "true" : "false");
+    if (active) card.__hit.setAttribute("aria-current", "true");
+    else card.__hit.removeAttribute("aria-current");
   }
 }
 
@@ -360,32 +386,38 @@ function renderSubmissionInfo(submission) {
     renderMeta(submission);
   }
 
-  // 待审核可以改；被拒绝/已撤回可以改好后重新提交，所以编辑表单也要露出来。
+  // 面板默认是只读详情：待审核可以改、被拒绝/已撤回可以改好后重新提交，
+  // 但表单只在 editMode 下展开，入口是卡片菜单里的「编辑提交 / 编辑并重新提交」。
   const editable = submission.status === "pending";
   const resubmittable = submission.status === "rejected" || submission.status === "withdrawn";
-  const formVisible = editable || resubmittable;
+  const canEdit = editable || resubmittable;
+  const formVisible = editMode && canEdit;
   editForm.hidden = !formVisible;
+  detailEyebrow.textContent = formVisible ? (editable ? "编辑提交" : "重新提交审核") : "记录详情";
+  editHint.hidden = !(formVisible && editable);
+  resubmitHint.hidden = !(formVisible && resubmittable);
   saveButton.textContent = editable ? "保存修改" : "重新提交审核";
-  withdrawButton.hidden = !editable;
-  resubmitHint.hidden = !resubmittable;
   // 重新提交要在服务端过 Cloudflare Turnstile，和 /submit.html 保持一致；
   // 只有被拒绝/已撤回的记录会走到这里，待审核的「保存修改」不需要验证。
-  const needsTurnstile = resubmittable && turnstileEnabled();
+  const needsTurnstile = formVisible && resubmittable && turnstileEnabled();
   detailTurnstile.hidden = !needsTurnstile;
   if (needsTurnstile) {
-    // 换一条记录就换一份令牌：Turnstile 的令牌是一次性的。
-    resetTurnstile();
+    // 换一条记录才换一份令牌：同一条记录重复渲染时保留访客已经通过的验证结果。
+    if (turnstileRecordId !== submission.id) {
+      turnstileRecordId = submission.id;
+      resetTurnstile();
+    }
     loadTurnstileScript();
     mountTurnstile();
   } else {
+    turnstileRecordId = "";
     turnstileToken = "";
     turnstileFailed = false;
     setTurnstileError("");
   }
-  // 发布中不允许删除（服务端会拒绝），这里也把入口收起来，避免点了才报错。
-  recordActions.hidden = submission.status === "approving";
   if (formVisible) {
     // 只在值真的变了才写回：URL 可能是几十 KB 的 data: 串，反复赋值会重新排版。
+    // 收起表单会留住没保存的输入，所以重新进入编辑时这里会把它们复位成记录里的值。
     const note = submission.note || "";
     if (nameInput.value !== submission.name) nameInput.value = submission.name;
     if (urlInput.value !== submission.url) urlInput.value = submission.url;
@@ -394,14 +426,90 @@ function renderSubmissionInfo(submission) {
   detail.hidden = false;
 }
 
+// ---------- 卡片右上角的操作：删除两步确认 + 「更多操作」菜单 ----------
+// 同一时刻只开一个菜单；点别处、按 Esc、换记录、执行任意动作都会收起。
+let openMenuCard = null;
+// 已经「上膛」等待确认的删除按钮：8 秒内不再点就自动还原，避免误触。
+let armedDelete = null;
+
+function armCardDelete(card) {
+  disarmCardDelete();
+  card.__deleteBtn.dataset.confirm = "true";
+  card.__deleteLabel.textContent = "确认删除";
+  armedDelete = {
+    card,
+    button: card.__deleteBtn,
+    timer: window.setTimeout(disarmCardDelete, 8000),
+  };
+}
+
+function disarmCardDelete() {
+  if (!armedDelete) return;
+  window.clearTimeout(armedDelete.timer);
+  armedDelete.button.dataset.confirm = "false";
+  armedDelete.card.__deleteLabel.textContent = "删除";
+  armedDelete = null;
+}
+
+function openCardMenu(card) {
+  if (openMenuCard && openMenuCard !== card) {
+    openMenuCard.__menu.hidden = true;
+    openMenuCard.__menuBtn.setAttribute("aria-expanded", "false");
+  }
+  openMenuCard = card;
+  card.__menu.hidden = false;
+  card.__menuBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeCardMenus() {
+  if (!openMenuCard) return;
+  openMenuCard.__menu.hidden = true;
+  openMenuCard.__menuBtn.setAttribute("aria-expanded", "false");
+  openMenuCard = null;
+}
+
+// 卡片按钮的忙碌态：按钮里还带着图标，直接改 textContent 会把图标一起抹掉，
+// 所以只替换文案节点，按钮宽度变化交给 data-busy 控制。
+async function withBusyText(button, label, busyText, action, doneText) {
+  if (!button || button.disabled) return;
+  const original = label.textContent;
+  button.disabled = true;
+  button.dataset.busy = "true";
+  label.textContent = busyText;
+  try {
+    await action();
+  } finally {
+    button.disabled = false;
+    delete button.dataset.busy;
+    label.textContent = typeof doneText === "function" ? doneText() : doneText || original;
+  }
+}
+
 // 卡片只创建一次，之后按 id 复用、只更新变化的文案。
 // 以前每次刷新都重建整张卡片，缩略图（data: 串）会被重新解码，长列表里很卡。
 function buildCard() {
-  const card = document.createElement("button");
-  card.type = "button";
+  const card = document.createElement("div");
   card.className = "submission-card";
   card.dataset.active = "false";
-  card.setAttribute("aria-expanded", "false");
+
+  // 「点整行展开/收起」交给这层铺满卡片的透明按钮，正文不参与命中测试，
+  // 右上角的按钮叠在它上面，两边互不抢点击。
+  const hit = document.createElement("button");
+  hit.type = "button";
+  hit.className = "card-hit";
+  hit.setAttribute("aria-expanded", "false");
+  hit.addEventListener("click", () => {
+    const item = card.__item;
+    if (!item) return;
+    closeCardMenus();
+    // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
+    if (currentId === item.submission.id && !detail.hidden) {
+      // 收起动画进行中不重复触发，否则要等两次动画跑完才关掉。
+      if (!detailClosing) resetDetailPanel({ animate: true });
+      return;
+    }
+    selectSubmission(item.submission.id, item.token, item.submission);
+  });
 
   const main = document.createElement("span");
   main.className = "card-main";
@@ -415,42 +523,129 @@ function buildCard() {
   sub.append(badge, idText);
   main.append(title, sub);
 
+  const thumb = iconThumb("");
+
+  // 右上角：[删除] [更多操作] [展开箭头]。删除自带两步确认，降低误触。
+  const tail = document.createElement("span");
+  tail.className = "card-tail";
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "card-action card-action-danger";
+  deleteBtn.setAttribute("aria-label", "删除记录");
+  deleteBtn.dataset.confirm = "false";
+  const deleteIcon = document.createElement("span");
+  deleteIcon.className = "icon";
+  deleteIcon.setAttribute("aria-hidden", "true");
+  deleteIcon.textContent = "🗑";
+  const deleteLabel = document.createElement("span");
+  deleteLabel.className = "button-label";
+  deleteLabel.textContent = "删除";
+  deleteBtn.append(deleteIcon, deleteLabel);
+  deleteBtn.addEventListener("click", () => {
+    const item = card.__item;
+    if (!item) return;
+    // 第一次点只是「上膛」，再点一次才真的删：误触时不会直接丢掉记录。
+    if (!armedDelete || armedDelete.card !== card) {
+      armCardDelete(card);
+      return;
+    }
+    disarmCardDelete();
+    closeCardMenus();
+    deleteSubmission(item.submission.id, item.token, { button: deleteBtn, label: deleteLabel });
+  });
+
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "card-action";
+  menuBtn.setAttribute("aria-label", "更多操作");
+  menuBtn.setAttribute("aria-expanded", "false");
+  const menuIcon = document.createElement("span");
+  menuIcon.className = "icon";
+  menuIcon.setAttribute("aria-hidden", "true");
+  menuIcon.textContent = "⋯";
+  menuBtn.append(menuIcon);
+  menuBtn.addEventListener("click", () => {
+    if (card.__menu.hidden) openCardMenu(card);
+    else closeCardMenus();
+  });
+
   const chevron = document.createElement("span");
   chevron.className = "card-chevron";
   chevron.setAttribute("aria-hidden", "true");
   chevron.textContent = "›";
+  tail.append(deleteBtn, menuBtn, chevron);
 
-  const thumb = iconThumb("");
-  card.append(thumb, main, chevron);
+  const menu = document.createElement("div");
+  menu.className = "card-menu";
+  menu.hidden = true;
+  const editItem = document.createElement("button");
+  editItem.type = "button";
+  editItem.className = "card-menu-item";
+  editItem.textContent = "编辑提交";
+  editItem.addEventListener("click", () => {
+    const item = card.__item;
+    if (!item) return;
+    closeCardMenus();
+    // 强制以编辑态打开：这条记录已经展开时也照样切进表单，而不是从只读详情再点一次。
+    selectSubmission(item.submission.id, item.token, item.submission, { edit: true });
+  });
+  const withdrawItem = document.createElement("button");
+  withdrawItem.type = "button";
+  withdrawItem.className = "card-menu-item";
+  withdrawItem.textContent = "撤回提交";
+  withdrawItem.addEventListener("click", () => {
+    const item = card.__item;
+    if (!item) return;
+    closeCardMenus();
+    withdrawSubmission(item.submission.id, item.token, item.submission, withdrawItem);
+  });
+  menu.append(editItem, withdrawItem);
+
+  card.append(hit, thumb, main, tail, menu);
+  card.__hit = hit;
   card.__thumb = thumb;
   card.__title = title;
   card.__badge = badge;
   card.__idText = idText;
-  card.addEventListener("click", () => {
-    const item = card.__item;
-    if (!item) return;
-    // 再点一次当前记录就收起详情，避免只能靠滚到页面底部操作。
-    if (currentId === item.submission.id && !detail.hidden) {
-      // 收起动画进行中不重复触发，否则要等两次动画跑完才关掉。
-      if (!detailClosing) resetDetailPanel({ animate: true });
-      return;
-    }
-    selectSubmission(item.submission.id, item.token, item.submission);
-  });
+  card.__deleteBtn = deleteBtn;
+  card.__deleteLabel = deleteLabel;
+  card.__menuBtn = menuBtn;
+  card.__menu = menu;
+  card.__editItem = editItem;
+  card.__withdrawItem = withdrawItem;
   return card;
 }
 
 function updateCard(card, item) {
   const { submission } = item;
+  const { status } = submission;
   card.__item = item;
   card.dataset.id = submission.id;
-  card.setAttribute(
+  card.__hit.setAttribute(
     "aria-label",
-    submission.name + "，状态：" + statusMeta(submission.status).label + "，查看详情",
+    submission.name + "，状态：" + statusMeta(status).label + "，查看详情",
   );
   card.__title.textContent = submission.name;
   card.__idText.textContent = "#" + String(submission.id).slice(0, 8);
-  applyBadge(card.__badge, submission.status);
+  applyBadge(card.__badge, status);
+  // 发布中的记录服务端不允许改动或删除，卡片上干脆不给入口。
+  const canEdit = status === "pending" || status === "rejected" || status === "withdrawn";
+  const canWithdraw = status === "pending";
+  const canDelete = status !== "approving";
+  card.__editItem.hidden = !canEdit;
+  card.__editItem.textContent = status === "pending" ? "编辑提交" : "编辑并重新提交";
+  card.__withdrawItem.hidden = !canWithdraw;
+  card.__menuBtn.hidden = !canEdit && !canWithdraw;
+  // 被拒绝/已撤回时「⋯」是重新提交的唯一入口，用强调色把它点出来，并把它写进无障碍名称。
+  const menuIsPrimary = status === "rejected" || status === "withdrawn";
+  card.__menuBtn.dataset.primary = String(menuIsPrimary);
+  card.__menuBtn.setAttribute("aria-label", menuIsPrimary ? "更多操作：可编辑或重新提交" : "更多操作");
+  // 操作按钮可以没有，展开箭头始终留着：它是「这行还能点开」的唯一视觉提示。
+  card.__deleteBtn.hidden = !canDelete;
+  // 重渲染时把菜单收起、把「上膛」的删除还原，避免旧状态串到新一轮数据上。
+  if (!card.__menu.hidden) closeCardMenus();
+  if (armedDelete && armedDelete.card === card) disarmCardDelete();
   if (card.__thumbUrl !== submission.url) {
     card.__thumbUrl = submission.url;
     const next = iconThumb(submission.url);
@@ -598,9 +793,14 @@ function revealDetail(activeCard) {
 
 function selectSubmission(id, token, submission, options) {
   const settings = options || {};
+  // 同一条记录已经展开时（例如从菜单切进编辑态）不重播展开动画：
+  // 面板是「就地换内容」，再播一次会整块闪一下。
+  const alreadyOpen = !detail.hidden && !detailClosing && currentId === id;
   currentId = id;
   currentToken = token;
   currentSubmission = submission;
+  // 默认只读；只有从卡片菜单进来的「编辑/重新提交」才展开表单。
+  editMode = settings.edit === true;
   renderSubmissionInfo(submission);
   markActiveCard(id);
   // 详情面板紧跟被点开的卡片，形成「在记录下面就地展开」的效果。
@@ -611,7 +811,7 @@ function selectSubmission(id, token, submission, options) {
   stopDetailAnimation();
   // 先按完整高度决定要不要滚动，再播展开动画，否则动画期间的 0 高度会让判断失真。
   if (settings.scroll !== false) revealDetail(activeCard);
-  if (settings.animate === false) return;
+  if (alreadyOpen || settings.animate === false) return;
   playDetailOpen();
 }
 
@@ -635,9 +835,12 @@ async function loadOne(reference) {
 // 清掉当前选中态（高亮、待确认按钮、当前记录信息）。
 function clearDetailSelection() {
   resetConfirmFlows();
+  disarmCardDelete();
+  closeCardMenus();
   currentId = "";
   currentToken = "";
   currentStatus = "";
+  editMode = false;
   markActiveCard("");
 }
 
@@ -648,7 +851,7 @@ function hideDetailPanel() {
   detailSignature = "";
   detail.hidden = true;
   editForm.hidden = true;
-  recordActions.hidden = true;
+  editMode = false;
   detailResult.hidden = true;
 }
 
@@ -777,7 +980,6 @@ async function saveSubmission(event) {
     saveButton,
     busyLabel,
     async () => {
-      withdrawButton.disabled = true;
       try {
         const response = await fetch("/api/submissions/" + encodeURIComponent(currentId), {
           method: "PATCH",
@@ -803,6 +1005,9 @@ async function saveSubmission(event) {
           }
           throw new Error(body.error || "保存失败（" + response.status + "）");
         }
+        // 成功后回到只读详情：表单由「编辑」菜单显式唤出，不用再手动收起。
+        // 失败时保持编辑态，访客改完可以直接重试。
+        editMode = false;
         showResult(body.resubmitted ? "已重新提交，等待审核。" : "修改已保存。", false, detailResult);
         // 服务端响应里已经带着最新记录，直接就地更新，省掉一轮全量请求和整表重建。
         if (body.submission) replaceItem(body.submission);
@@ -810,7 +1015,6 @@ async function saveSubmission(event) {
       } catch (error) {
         showResult(error.message, true, detailResult);
       } finally {
-        withdrawButton.disabled = false;
         // 令牌一次性：无论成功失败都重置控件，下次提交需要重新验证。
         if (verifying) resetTurnstile();
       }
@@ -819,12 +1023,9 @@ async function saveSubmission(event) {
   );
 }
 
-async function withdrawSubmission() {
-  // 请求期间访客可能点了别的记录，先把目标固定下来。
-  const id = currentId;
-  const token = currentToken;
-  const base = currentSubmission;
-  await runAction(withdrawButton, "撤回中…", async () => {
+// 撤回：入口挪到卡片菜单里，目标记录由参数传进来，不再依赖「当前选中的记录」。
+async function withdrawSubmission(id, token, base, button) {
+  const run = async () => {
     try {
       const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "POST",
@@ -832,21 +1033,21 @@ async function withdrawSubmission() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "撤回失败（" + response.status + "）");
-      showResult("提交已撤回，可修改后重新提交。", false, detailResult);
       // 撤回只改状态（接口不返回整条记录），本地同步一份即可。
       if (base) replaceItem({ ...base, id, status: "withdrawn" });
       else await loadAll();
+      showToast("已撤回这条提交，可以改好后再重新提交。");
     } catch (error) {
-      showResult(error.message, true, detailResult);
+      showToast(error.message, true);
+      if (id === currentId) showResult(error.message, true, detailResult);
     }
-  });
+  };
+  await withBusyText(button, button, "撤回中…", run, "撤回提交");
 }
 
-async function deleteSubmission() {
-  if (!currentId) return;
-  const id = currentId;
-  const token = currentToken;
-  await runAction(deleteButton, "删除中…", async () => {
+// 删除：入口在卡片右上角，两步确认由卡片自己处理，这里只负责发请求和收尾。
+async function deleteSubmission(id, token, control) {
+  const run = async () => {
     try {
       const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "DELETE",
@@ -857,17 +1058,23 @@ async function deleteSubmission() {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || "删除失败（" + response.status + "）");
       }
+      const wasSelected = id === currentId;
       removeSavedSubmission(id);
-      resetDetailPanel();
-      // 删除后面板会关闭，所以结果提示放到列表上方。
-      showResult("提交记录已删除。", false, result);
+      if (wasSelected) resetDetailPanel();
+      showToast("提交记录已删除。");
       // 只从本地列表里摘掉这一条，其它卡片和缩略图都不重建。
       if (currentItems.some((item) => item.submission.id === id)) dropItem(id);
       else await loadAll();
     } catch (error) {
-      showResult(error.message, true, detailResult);
+      // 按钮就在卡片上，出错时用浮层提示；面板里那行结果只在它确实可见时同步一份。
+      showToast(error.message, true);
+      if (id === currentId) showResult(error.message, true, detailResult);
     }
-  });
+  };
+  const button = control && control.button;
+  const label = control && control.label;
+  if (button && label) await withBusyText(button, label, "删除中…", run, "删除");
+  else await run();
 }
 
 // 一键清空全部本地记录：逐条调用删除接口，发布中的记录服务端会拒绝，失败的最后统一提示。
@@ -967,17 +1174,27 @@ createConfirmFlow(clearAllButton, clearAllCancel, {
   confirmLabel: "确认清空全部",
   action: clearAllSubmissions,
 });
-createConfirmFlow(withdrawButton, withdrawCancel, {
-  label: "撤回提交",
-  confirmLabel: "确认撤回",
-  action: withdrawSubmission,
-});
-createConfirmFlow(deleteButton, deleteCancel, {
-  label: "删除记录",
-  confirmLabel: "确认删除",
-  action: deleteSubmission,
+editForm.addEventListener("submit", saveSubmission);
+// 「取消」放弃本次编辑，面板回到只读详情。
+// 没保存的输入留在表单里，下次进入编辑时会被记录里的值复位。
+cancelEdit.addEventListener("click", () => {
+  editMode = false;
+  detailResult.hidden = true;
+  if (currentSubmission) renderSubmissionInfo(currentSubmission);
 });
 
-editForm.addEventListener("submit", saveSubmission);
+// 点面板/卡片以外的地方、或按 Esc，收起卡片菜单并取消还没确认的删除，避免误触。
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (armedDelete && !armedDelete.button.contains(target)) disarmCardDelete();
+  if (openMenuCard && !openMenuCard.contains(target)) closeCardMenus();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  disarmCardDelete();
+  closeCardMenus();
+});
+
 loadAll();
 initTelegramWebApp();
