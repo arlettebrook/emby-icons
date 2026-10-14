@@ -179,7 +179,7 @@ function iconThumb(url) {
   return img;
 }
 
-// ---------- Cloudflare Turnstile：重新提交和 /submit.html 走同一套校验 ----------
+// ---------- Cloudflare Turnstile：编辑提交 / 重新提交 和 /submit.html 走同一套校验 ----------
 function turnstileEnabled() {
   return Boolean(TURNSTILE_SITE_KEY);
 }
@@ -238,7 +238,7 @@ function mountTurnstile() {
   }
 }
 
-// 令牌是一次性的：每次重新提交（无论成功还是失败）后都要重置控件，
+// 令牌是一次性的：每次保存或重新提交（无论成功还是失败）后都要重置控件，
 // 否则控件会停在旧结果上、不再签发新令牌，导致下一次提交验证失效。
 function resetTurnstile() {
   turnstileToken = "";
@@ -433,12 +433,13 @@ function renderSubmissionInfo(submission) {
   editHint.hidden = !(formVisible && editable);
   resubmitHint.hidden = !(formVisible && resubmittable);
   saveButton.textContent = editable ? "保存修改" : "重新提交审核";
-  // 重新提交要在服务端过 Cloudflare Turnstile，和 /submit.html 保持一致；
-  // 只有被拒绝/已撤回的记录会走到这里，待审核的「保存修改」不需要验证。
-  const needsTurnstile = formVisible && resubmittable && turnstileEnabled();
+  // 「编辑提交」和「编辑并重新提交」都要在服务端过 Cloudflare Turnstile，和 /submit.html 保持一致：
+  // 两者都会改到公开队列里的内容，光靠访问令牌挡不住批量脚本。
+  const needsTurnstile = formVisible && turnstileEnabled();
   detailTurnstile.hidden = !needsTurnstile;
   if (needsTurnstile) {
-    // 换一条记录才换一份令牌：同一条记录重复渲染时保留访客已经通过的验证结果。
+    // 换一条记录才换一份令牌：同一条记录重复渲染（保存后回写、只读/编辑来回切）时
+    // 保留访客已经通过的验证结果，不用重复答题。
     if (turnstileRecordId !== submission.id) {
       turnstileRecordId = submission.id;
       resetTurnstile();
@@ -498,6 +499,29 @@ function toggleCardDetail(card) {
   selectSubmission(item.submission.id, item.token, item.submission);
 }
 
+// 按钮排序：按文案字数从短到长，字数相同再按固定语义顺序（查看 → 编辑 → 撤回 → 删除）兜底。
+// 这样一排下来是「短 → 长」的阶梯，换行时也不会出现「短长短」的锯齿。
+// 文案会随状态变（编辑提交 / 编辑并重新提交），所以每次更新卡片后都要重排一次。
+const ACTION_RANK = { view: 0, edit: 1, withdraw: 2, delete: 3 };
+
+function compareCardActions(a, b) {
+  const byLength = a.textContent.length - b.textContent.length;
+  if (byLength !== 0) return byLength;
+  return ACTION_RANK[a.dataset.action] - ACTION_RANK[b.dataset.action];
+}
+
+function orderCardActions(card) {
+  const current = [...card.__tail.children];
+  // 可见按钮数量给 CSS 用：只剩一颗时不要拉满整行。
+  // 隐藏的兄弟节点还在 DOM 里，:only-child 永远不成立，所以只能靠这个计数。
+  card.__tail.dataset.count = String(current.filter((button) => !button.hidden).length);
+  if (current.length < 2) return;
+  const sorted = current.slice().sort(compareCardActions);
+  // 顺序没变就别碰 DOM：append 会重新插入节点，长列表里白白多一次重排。
+  if (sorted.every((button, index) => button === current[index])) return;
+  for (const button of sorted) card.__tail.append(button);
+}
+
 // 卡片只创建一次，之后按 id 复用、只更新变化的文案。
 // 以前每次刷新都重建整张卡片，缩略图（data: 串）会被重新解码，长列表里很卡。
 function buildCard() {
@@ -536,6 +560,7 @@ function buildCard() {
   const viewBtn = document.createElement("button");
   viewBtn.type = "button";
   viewBtn.className = "card-action card-action-view";
+  viewBtn.dataset.action = "view";
   viewBtn.setAttribute("aria-label", "查看详情");
   viewBtn.setAttribute("aria-expanded", "false");
   viewBtn.textContent = "查看";
@@ -545,6 +570,7 @@ function buildCard() {
   const editBtn = document.createElement("button");
   editBtn.type = "button";
   editBtn.className = "card-action card-action-edit";
+  editBtn.dataset.action = "edit";
   editBtn.textContent = "编辑提交";
   editBtn.addEventListener("click", () => {
     const item = card.__item;
@@ -556,6 +582,7 @@ function buildCard() {
   const withdrawBtn = document.createElement("button");
   withdrawBtn.type = "button";
   withdrawBtn.className = "card-action";
+  withdrawBtn.dataset.action = "withdraw";
   withdrawBtn.textContent = "撤回提交";
   withdrawBtn.addEventListener("click", () => {
     const item = card.__item;
@@ -566,6 +593,7 @@ function buildCard() {
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "card-action card-action-danger";
+  deleteBtn.dataset.action = "delete";
   deleteBtn.setAttribute("aria-label", "删除记录");
   deleteBtn.dataset.confirm = "false";
   deleteBtn.textContent = "删除";
@@ -584,6 +612,7 @@ function buildCard() {
   tail.append(viewBtn, editBtn, withdrawBtn, deleteBtn);
 
   card.append(hit, thumb, main, tail);
+  card.__tail = tail;
   card.__hit = hit;
   card.__thumb = thumb;
   card.__title = title;
@@ -618,6 +647,8 @@ function updateCard(card, item) {
   card.__editBtn.setAttribute("aria-label", status === "pending" ? "编辑这条提交" : "编辑并重新提交审核");
   card.__withdrawBtn.hidden = !canWithdraw;
   card.__deleteBtn.hidden = !canDelete;
+  // 文案和可见性都定下来了，最后按字数把这一排重排一次。
+  orderCardActions(card);
   // 重渲染时把「上膛」的删除还原，避免旧状态串到新一轮数据上。
   if (armedDelete && armedDelete.card === card) disarmCardDelete();
   if (card.__thumbUrl !== submission.url) {
@@ -940,11 +971,15 @@ async function saveSubmission(event) {
   };
   // 非待审核的记录走「重新提交」：服务端会把它改回待审核队列并重新通知审核人。
   if (resubmitting) payload.resubmit = true;
-  // 重新提交和 /submit.html 一样要过 Cloudflare 人机验证；
+  // 编辑提交和重新提交都和 /submit.html 一样要过 Cloudflare 人机验证；
   // 控件没渲染出来（脚本被拦等）时不拦本地提交，交给服务端判定。
-  const verifying = resubmitting && turnstileEnabled() && turnstileWidgetId !== null;
+  const verifying = turnstileEnabled() && turnstileWidgetId !== null;
   if (verifying && !turnstileFailed && !turnstileToken) {
-    showResult("请先完成上方的人机验证，再点「重新提交审核」。", true, detailResult);
+    showResult(
+      resubmitting ? "请先完成上方的人机验证，再点「重新提交审核」。" : "请先完成上方的人机验证，再点「保存修改」。",
+      true,
+      detailResult,
+    );
     detailTurnstile.scrollIntoView({ behavior: "smooth", block: "nearest" });
     return;
   }
@@ -988,7 +1023,7 @@ async function saveSubmission(event) {
       } catch (error) {
         showResult(error.message, true, detailResult);
       } finally {
-        // 令牌一次性：无论成功失败都重置控件，下次提交需要重新验证。
+        // 令牌一次性：无论成功失败都重置控件，下次保存或重新提交都需要重新验证。
         if (verifying) resetTurnstile();
       }
     },

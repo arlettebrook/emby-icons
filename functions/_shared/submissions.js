@@ -330,6 +330,10 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
   if (validation.error) return jsonResponse(request, env, { error: validation.error }, { status: 400 });
 
   if (row.status === "pending") {
+    // 待审核的修改同样会改到公开队列里的内容，和重新提交一样要过 Turnstile：
+    // 访问令牌只能证明「这条记录是你的」，挡不住拿着真实令牌的批量脚本。
+    const turnstileError = await verifyTurnstile(request, env, body);
+    if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
     await env.DB.prepare("UPDATE submissions SET name = ?1, url = ?2, note = ?3 WHERE id = ?4 AND status = 'pending'")
       .bind(validation.value.name, validation.value.url, validation.value.note, id)
       .run();
@@ -343,7 +347,7 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
     return jsonResponse(request, env, { error: "Only pending submissions can be edited" }, { status: 409 });
   }
   // 重新提交会重新进入公共审核队列，所以和首次提交一样要过 Turnstile；
-  // 待审核的普通修改、撤回、删除沿用访问令牌，不额外要求验证。
+  // 撤回、删除只改自己这一条的状态，沿用访问令牌，不额外要求验证。
   const turnstileError = await verifyTurnstile(request, env, body);
   if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
 

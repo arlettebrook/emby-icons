@@ -175,8 +175,8 @@
            每个动作都仍然留在明面上，不需要点开「⋯」才知道能做什么。 */
         .card-tail { grid-column: 1 / -1; }
         .card-action { flex: 1 1 auto; height: 36px; }
-        /* 只剩「查看」一个按钮时不要拉满整行，右对齐放着就行。 */
-        .card-action:only-child { flex: 0 0 auto; }
+        /* 只剩一颗按钮（例如发布中的记录只有「查看」）时不要拉满整行，右对齐放着就行。 */
+        .card-tail[data-count="1"] .card-action { flex: 0 0 auto; }
         .submission-actions { display: grid; grid-template-columns: 1fr; }
         .submission-actions .button { width: 100%; min-height: 44px; }
         .standalone-links { display: grid; grid-template-columns: 1fr; }
@@ -204,7 +204,7 @@
           <div>
             <p class="eyebrow">EMBY ICONS / SUBMISSION STATUS</p>
             <h1>我的提交</h1>
-            <p class="submission-lede">当前浏览器会自动保存你的提交记录。点卡片上的「查看」展开审核详情；要改内容或重新提交，点同一行的「编辑提交」；删除要点两次才会生效。</p>
+            <p class="submission-lede">当前浏览器会自动保存你的提交记录。点卡片上的「查看」展开审核详情；要改内容或重新提交，点同一行的「编辑提交」，保存前需要通过人机验证；删除要点两次才会生效。</p>
           </div>
           <div class="submission-hero-side">
             <div class="submission-clear" id="submission-clear" hidden>
@@ -232,13 +232,13 @@
               <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
               <!-- 表单只在点卡片上的「编辑提交 / 编辑并重新提交」时才展开；默认这里是只读详情。 -->
               <form class="standalone-form" id="edit-form" hidden>
-                <p class="form-note" id="edit-hint" hidden>当前是待审核记录，直接改名称、链接或说明，改好点「保存修改」；点「取消」放弃本次改动。撤回和删除在卡片右侧。</p>
+                <p class="form-note" id="edit-hint" hidden>当前是待审核记录，直接改名称、链接或说明，通过下方的人机验证后点「保存修改」；点「取消」放弃本次改动。撤回和删除在卡片右侧。</p>
                 <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
                 <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
                 <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
-                <p class="form-note accent" id="resubmit-hint" hidden>改好后点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
+                <p class="form-note accent" id="resubmit-hint" hidden>改好后通过下方的人机验证，再点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
                 <div class="turnstile-box" id="detail-turnstile" hidden>
-                  <p class="form-note">重新提交与首次提交一样需要通过 Cloudflare 人机验证，验证只用于拦截批量提交。</p>
+                  <p class="form-note">保存修改和重新提交与首次提交一样需要通过 Cloudflare 人机验证，验证只用于拦截批量提交。</p>
                   <div id="turnstile-container"></div>
                   <p class="form-note error" id="turnstile-error" hidden></p>
                 </div>
@@ -255,9 +255,9 @@
       </section>
     </main>
     <script>
-      // Cloudflare Turnstile 的 Site Key 不是秘密值；重新提交和 /submit.html 复用同一个控件。
+      // Cloudflare Turnstile 的 Site Key 不是秘密值；编辑提交 / 重新提交和 /submit.html 复用同一个控件。
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submission.js?v=20261012-ui32"></script>
+    <script type="module" src="/submission.js?v=20261012-ui33"></script>
   </body>
 </html>

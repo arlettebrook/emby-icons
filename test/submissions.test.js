@@ -269,7 +269,7 @@ test("a withdrawn submission can be resubmitted without resubmit-flag errors", a
   assert.equal(env.DB.submissions.get(id).status, "pending");
 });
 
-test("resubmitting a rejected icon requires a valid Turnstile token", async () => {
+test("Turnstile is required for editing pending records and resubmitting rejected ones", async () => {
   const env = createEnvironment({ turnstileSecret: "turnstile-secret", requireTurnstile: true });
   const originalFetch = globalThis.fetch;
   const verified = [];
@@ -305,22 +305,51 @@ test("resubmitting a rejected icon requires a valid Turnstile token", async () =
     assert.equal(env.DB.submissions.get(id).status, "pending");
     assert.ok(verified.some((call) => call.url.includes("siteverify") && call.body.includes("response=site-token")));
 
-    // 待审核的普通修改只用访问令牌，不额外要求人机验证。
+    // 待审核的「编辑提交」同样要过这道验证：没有令牌一律拒绝，而且不能改动记录。
     const { id: pendingId, token: pendingToken } = await createWithToken(env, "Other", "https://example.com/other.png", "create-token");
-    const edited = await handleSubmissionItem(
-      ownerRequest(pendingId, pendingToken, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "OtherFixed", url: "https://example.com/other.png", note: "" }),
-      }),
-      env,
-      pendingId,
-    );
-    assert.equal(edited.status, 200);
+    const edit = (headers) =>
+      handleSubmissionItem(
+        ownerRequest(pendingId, pendingToken, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ name: "OtherFixed", url: "https://example.com/other.png", note: "" }),
+        }),
+        env,
+        pendingId,
+      );
+
+    const blockedEdit = await edit({});
+    assert.equal(blockedEdit.status, 403);
+    assert.match((await blockedEdit.json()).error, /turnstile/i);
+    assert.equal(env.DB.submissions.get(pendingId).name, "Other");
+
+    const allowedEdit = await edit({ "X-Turnstile-Token": "edit-token" });
+    assert.equal(allowedEdit.status, 200);
+    assert.equal(env.DB.submissions.get(pendingId).name, "OtherFixed");
+    assert.ok(verified.some((call) => call.url.includes("siteverify") && call.body.includes("response=edit-token")));
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
+test("editing a pending submission still works when Turnstile is not configured", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+
+  const response = await handleSubmissionItem(
+    ownerRequest(id, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "DemoFixed", url: "https://example.com/demo-fixed.png", note: "改好了" }),
+    }),
+    env,
+    id,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).submission.name, "DemoFixed");
+  assert.equal(env.DB.submissions.get(id).name, "DemoFixed");
+});
+
 test("editing a resolved submission without the resubmit flag stays rejected", async () => {
   const env = createEnvironment();
   const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
