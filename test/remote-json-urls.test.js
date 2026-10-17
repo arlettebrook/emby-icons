@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
 import {
   MAX_REMOTE_JSON_URLS,
+  MAX_REMOTE_JSON_URL_NOTE_LENGTH,
   REMOTE_JSON_URLS_KEY,
   handleAdminRemoteJsonUrlCollection,
   handleAdminRemoteJsonUrlItem,
@@ -58,6 +60,7 @@ test("admin can create, list, read, update, and delete saved remote JSON URLs", 
   assert.equal(createdResponse.status, 201);
   const created = await createdResponse.json();
   assert.equal(created.item.url, "https://example.com/icons/emby.json");
+  assert.equal(created.item.note, "");
   assert.equal(typeof created.item.id, "string");
   assert.equal(created.item.createdAt, created.item.updatedAt);
   assert.equal(created.count, 1);
@@ -84,6 +87,7 @@ test("admin can create, list, read, update, and delete saved remote JSON URLs", 
   const updated = (await updatedResponse.json()).item;
   assert.equal(updated.id, created.item.id);
   assert.equal(updated.url, "https://cdn.example.com/emby-icons.json");
+  assert.equal(updated.note, "");
   assert.equal(updated.createdAt, created.item.createdAt);
   assert.ok(updated.updatedAt >= created.item.updatedAt);
 
@@ -144,6 +148,94 @@ test("remote JSON URL updates cannot duplicate another saved address", async () 
     second.item.id,
   );
   assert.equal(response.status, 409);
+});
+
+test("saved remote JSON URL notes can be added, changed, preserved, and cleared", async () => {
+  const env = createEnvironment();
+  const created = await handleAdminRemoteJsonUrlCollection(
+    collectionRequest("POST", { url: "  https://Example.COM/library.json  ", note: "  LiangYou 图标库  " }),
+    env,
+  ).then((response) => response.json());
+  assert.equal(created.item.note, "LiangYou 图标库");
+  assert.deepEqual(JSON.parse(env.__kv.get(REMOTE_JSON_URLS_KEY)).items, [created.item]);
+
+  const listed = await handleAdminRemoteJsonUrlCollection(collectionRequest(), env).then((response) => response.json());
+  assert.equal(listed.items[0].note, "LiangYou 图标库");
+
+  const renamed = await handleAdminRemoteJsonUrlItem(
+    itemRequest(created.item.id, "PUT", { url: created.item.url, note: "  新备注  " }),
+    env,
+    created.item.id,
+  ).then((response) => response.json());
+  assert.equal(renamed.item.note, "新备注");
+
+  const urlOnly = await handleAdminRemoteJsonUrlItem(
+    itemRequest(created.item.id, "PUT", { url: "https://cdn.example.com/library.json" }),
+    env,
+    created.item.id,
+  ).then((response) => response.json());
+  assert.equal(urlOnly.item.note, "新备注");
+
+  const cleared = await handleAdminRemoteJsonUrlItem(
+    itemRequest(created.item.id, "PUT", { url: urlOnly.item.url, note: "   " }),
+    env,
+    created.item.id,
+  ).then((response) => response.json());
+  assert.equal(cleared.item.note, "");
+});
+
+test("saved remote JSON URL notes enforce type and length limits", async () => {
+  const env = createEnvironment();
+  const url = "https://example.com/library.json";
+
+  for (const note of [42, true, ["note"], { text: "note" }]) {
+    const response = await handleAdminRemoteJsonUrlCollection(collectionRequest("POST", { url, note }), env);
+    assert.equal(response.status, 400, String(note));
+  }
+
+  const tooLong = await handleAdminRemoteJsonUrlCollection(
+    collectionRequest("POST", { url, note: "图".repeat(MAX_REMOTE_JSON_URL_NOTE_LENGTH + 1) }),
+    env,
+  );
+  assert.equal(tooLong.status, 400);
+
+  const maxLength = await handleAdminRemoteJsonUrlCollection(
+    collectionRequest("POST", { url, note: "图".repeat(MAX_REMOTE_JSON_URL_NOTE_LENGTH) }),
+    env,
+  );
+  assert.equal(maxLength.status, 201);
+  const created = await maxLength.json();
+  assert.equal(Array.from(created.item.note).length, MAX_REMOTE_JSON_URL_NOTE_LENGTH);
+});
+
+test("legacy saved remote JSON URLs without notes remain readable", async () => {
+  const env = createEnvironment();
+  await env.EMBY_ICONS.put(REMOTE_JSON_URLS_KEY, JSON.stringify({
+    version: 1,
+    updatedAt: 1,
+    items: [{
+      id: "legacy-id",
+      url: "https://example.com/legacy.json",
+      createdAt: 1,
+      updatedAt: 1,
+    }],
+  }));
+
+  const response = await handleAdminRemoteJsonUrlCollection(collectionRequest(), env);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.items[0].note, "");
+});
+
+test("admin import UI exposes note editing and direct saved-address fetch controls", async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL("../public/admin.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /id="remote-note"/);
+  assert.match(html, /maxlength="100"/);
+  assert.match(script, /function fetchSavedRemoteJson\(/);
+  assert.match(script, /remote-history-action remote-history-fetch/);
 });
 
 test("unknown remote JSON URL ids return 404", async () => {

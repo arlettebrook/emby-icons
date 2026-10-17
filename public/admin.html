@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20261017-ui26" />
+    <link rel="stylesheet" href="/styles.css?v=20261017-ui27" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -334,17 +334,22 @@
           <button class="icon-button" id="import-close-button" type="button" aria-label="关闭" title="关闭">×</button>
         </div>
         <p class="dialog-lead">导入只会追加 icons，name 和 description 会保留当前配置。重复名称会自动跳过，保存到 Cloudflare KV 需要管理员令牌。</p>
-        <div class="remote-import-row">
-          <label class="field">
+        <div class="remote-import-fields">
+          <label class="field remote-url-field">
             <span>远程 JSON 地址</span>
             <input id="remote-url" type="url" inputmode="url" placeholder="https://example.com/emby-icons.json" autocomplete="off" aria-describedby="remote-url-hint" />
             <small class="field-hint" id="remote-url-hint">地址保存到 Cloudflare KV，只有管理员可以查看和修改</small>
           </label>
-          <div class="remote-import-actions">
-            <button class="button button-secondary remote-save-button" id="remote-save-button" type="button">保存地址</button>
-            <button class="button button-secondary" id="remote-edit-cancel" type="button" hidden>取消编辑</button>
-            <button class="button button-secondary remote-fetch-button" id="remote-fetch-button" type="button">获取远程 JSON</button>
-          </div>
+          <label class="field remote-note-field">
+            <span>备注 <small class="field-optional">可选</small></span>
+            <input id="remote-note" type="text" maxlength="100" placeholder="例如：官方图标库" autocomplete="off" aria-describedby="remote-note-hint" />
+            <small class="field-hint" id="remote-note-hint">用于区分多个已保存地址，最多 100 个字符</small>
+          </label>
+        </div>
+        <div class="remote-import-actions">
+          <button class="button button-primary remote-save-button" id="remote-save-button" type="button">保存地址</button>
+          <button class="button button-secondary" id="remote-edit-cancel" type="button" hidden>取消编辑</button>
+          <button class="button button-secondary remote-fetch-button" id="remote-fetch-button" type="button">获取远程 JSON</button>
         </div>
         <p class="remote-url-error" id="remote-url-error" role="alert" hidden></p>
         <div class="remote-history" id="remote-history">
@@ -408,7 +413,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
-    <script type="module" src="/admin-entry.js?v=20261017-ui26"></script>
+    <script type="module" src="/admin-entry.js?v=20261017-ui27"></script>
   </body>
 </html>
 

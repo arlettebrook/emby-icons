@@ -2,6 +2,7 @@ import { hasAdminAccess } from "./admin.js";
 
 export const REMOTE_JSON_URLS_KEY = "settings/remote-json-urls.json";
 export const MAX_REMOTE_JSON_URLS = 50;
+export const MAX_REMOTE_JSON_URL_NOTE_LENGTH = 100;
 
 const STORE_VERSION = 1;
 const MAX_BODY_BYTES = 8 * 1024;
@@ -67,6 +68,16 @@ export function validateRemoteUrl(value) {
   return { url };
 }
 
+function validateRemoteNote(value) {
+  if (value === undefined || value === null) return { note: "" };
+  if (typeof value !== "string") return { error: "Remote note must be a string" };
+  const note = value.trim();
+  if (Array.from(note).length > MAX_REMOTE_JSON_URL_NOTE_LENGTH) {
+    return { error: `Remote note must not exceed ${MAX_REMOTE_JSON_URL_NOTE_LENGTH} characters` };
+  }
+  return { note };
+}
+
 async function requireAdmin(request, env) {
   if (!env.ADMIN_TOKEN) return jsonResponse(request, { error: "ADMIN_TOKEN is not configured" }, { status: 503 });
   if (!(await hasAdminAccess(request, env))) return jsonResponse(request, { error: "Invalid admin session" }, { status: 401 });
@@ -96,11 +107,14 @@ async function readStore(env) {
     }
     const checked = validateRemoteUrl(item.url);
     if (checked.error) throw httpError(500, "远程地址配置中存在无效 URL");
+    const checkedNote = validateRemoteNote(item.note ?? "");
+    if (checkedNote.error) throw httpError(500, "远程地址配置中存在无效备注");
     if (ids.has(item.id)) throw httpError(500, "远程地址配置中存在重复 ID");
     ids.add(item.id);
     items.push({
       id: item.id,
       url: checked.url.href,
+      note: checkedNote.note,
       createdAt: Number(item.createdAt) || 0,
       updatedAt: Number(item.updatedAt) || 0,
     });
@@ -136,11 +150,13 @@ async function readBody(request) {
   return body;
 }
 
-async function readBodyUrl(request) {
+async function readBodyUrlAndNote(request, fallbackNote = "") {
   const body = await readBody(request);
-  const checked = validateRemoteUrl(body.url);
-  if (checked.error) throw httpError(400, checked.error);
-  return checked.url.href;
+  const checkedUrl = validateRemoteUrl(body.url);
+  if (checkedUrl.error) throw httpError(400, checkedUrl.error);
+  const checkedNote = validateRemoteNote(Object.hasOwn(body, "note") ? body.note : fallbackNote);
+  if (checkedNote.error) throw httpError(400, checkedNote.error);
+  return { url: checkedUrl.url.href, note: checkedNote.note };
 }
 
 export async function handleAdminRemoteJsonUrlCollection(request, env) {
@@ -154,7 +170,7 @@ export async function handleAdminRemoteJsonUrlCollection(request, env) {
     const store = await readStore(env);
     if (request.method === "GET") return jsonResponse(request, store);
 
-    const url = await readBodyUrl(request);
+    const { url, note } = await readBodyUrlAndNote(request);
     if (store.items.some((item) => item.url === url)) {
       return jsonResponse(request, { error: "该远程地址已保存" }, { status: 409 });
     }
@@ -163,7 +179,7 @@ export async function handleAdminRemoteJsonUrlCollection(request, env) {
     }
 
     const now = Date.now();
-    const item = { id: crypto.randomUUID(), url, createdAt: now, updatedAt: now };
+    const item = { id: crypto.randomUUID(), url, note, createdAt: now, updatedAt: now };
     store.items.unshift(item);
     store.updatedAt = now;
     await writeStore(env, store);
@@ -197,11 +213,11 @@ export async function handleAdminRemoteJsonUrlItem(request, env, id) {
       return jsonResponse(request, { ok: true, id: itemId, count: store.items.length, updatedAt: store.updatedAt });
     }
 
-    const url = await readBodyUrl(request);
+    const { url, note } = await readBodyUrlAndNote(request, current.note);
     if (store.items.some((item, itemIndex) => itemIndex !== index && item.url === url)) {
       return jsonResponse(request, { error: "该远程地址已保存" }, { status: 409 });
     }
-    const updated = { ...current, url, updatedAt: Date.now() };
+    const updated = { ...current, url, note, updatedAt: Date.now() };
     store.items[index] = updated;
     store.updatedAt = updated.updatedAt;
     await writeStore(env, store);
