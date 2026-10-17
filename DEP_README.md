@@ -76,6 +76,8 @@ npm run dev
 - 公开配置：`https://<你的域名>/emby-icons.json`
 - 管理 API：`GET/PUT https://<你的域名>/api/icons`
 - 管理员远程导入：`POST https://<你的域名>/api/import`
+- 已保存远程地址：`GET/POST https://<你的域名>/api/admin/remote-json-urls`
+- 单条远程地址：`GET/PUT/DELETE https://<你的域名>/api/admin/remote-json-urls/<id>`
 
 管理面板和公开配置接口只读取 `EMBY_ICONS` KV。KV 为空时，管理面板会提示导入 JSON；公开配置接口返回 404，不会回退到仓库文件。
 
@@ -155,4 +157,5 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 - <https://raw.githubusercontent.com/arlettebrook/emby-icons/refs/heads/main/emby-icons.json>
 - <https://s.nek.loc.cc/emby-icons>
 
-管理面板支持 JSON 文件导入、远程 URL 导入、JSON 导出、复制 JSON 和粘贴导入。所有导入只追加 `icons`，不会覆盖当前的 `name` 和 `description`；导入会按照 `name` 去重。导入写入 KV 前需要管理员令牌。公开配置复制按钮会复制 `/emby-icons.json` 当前内容。
+管理面板支持 JSON 文件导入、远程 URL 导入、JSON 导出、复制 JSON 和粘贴导入。远程地址可保存到 `EMBY_ICONS` KV 的 `settings/remote-json-urls.json`，并通过管理员 API 完成新增、列表、单条读取、修改和删除；保存的地址可在再次打开导入窗口时直接选择。地址接口仅允许管理员会话或 `ADMIN_TOKEN` 访问，最多保存 50 个地址，并拒绝重复、非法、带凭据或指向私网的 URL。所有导入只追加 `icons`，不会覆盖当前的 `name` 和 `description`；导入会按照 `name` 去重。导入写入 KV 前需要管理员令牌。公开配置复制按钮会复制 `/emby-icons.json` 当前内容。
+

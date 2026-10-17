@@ -35,8 +35,18 @@ const elements = {
   importForm: document.querySelector("#import-form"),
   iconSort: document.querySelector("#icon-sort"),
   loadMoreButton: document.querySelector("#load-more-button"),
+  remoteEditCancel: document.querySelector("#remote-edit-cancel"),
   remoteFetchButton: document.querySelector("#remote-fetch-button"),
+  remoteHistory: document.querySelector("#remote-history"),
+  remoteHistoryCount: document.querySelector("#remote-history-count"),
+  remoteHistoryEmpty: document.querySelector("#remote-history-empty"),
+  remoteHistoryError: document.querySelector("#remote-history-error"),
+  remoteHistoryList: document.querySelector("#remote-history-list"),
+  remoteHistoryRefresh: document.querySelector("#remote-history-refresh"),
+  remoteSaveButton: document.querySelector("#remote-save-button"),
   remoteUrl: document.querySelector("#remote-url"),
+  remoteUrlError: document.querySelector("#remote-url-error"),
+  remoteUrlHint: document.querySelector("#remote-url-hint"),
   iconList: document.querySelector("#icon-list"),
   jsonEditor: document.querySelector("#json-editor"),
   jsonMessage: document.querySelector("#json-message"),
@@ -77,6 +87,9 @@ let renderFrame = 0;
 let pendingSearchDeleteIcons = [];
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
+let savedRemoteUrls = [];
+let remoteUrlsLoading = false;
+let editingRemoteUrlId = null;
 
 async function copyText(value) {
   if (navigator.clipboard?.writeText) {
@@ -264,13 +277,213 @@ function getSerializedDocument() {
   return `${JSON.stringify(documentData, null, 2)}\n`;
 }
 
+function normalizeRemoteUrl(value) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function setRemoteUrlError(message = "") {
+  elements.remoteUrlError.textContent = message;
+  elements.remoteUrlError.hidden = !message;
+}
+
+function setRemoteHistoryError(message = "") {
+  elements.remoteHistoryError.textContent = message;
+  elements.remoteHistoryError.hidden = !message;
+}
+
+function remoteAdminHeaders(headers = {}) {
+  const token = sessionStorage.getItem("emby-icons-admin-token") || "";
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers };
+}
+
+async function remoteJsonUrlRequest(path = "", { headers = {}, ...options } = {}) {
+  const response = await fetch(`/api/admin/remote-json-urls${path}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+    ...options,
+    headers: remoteAdminHeaders(headers),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    sessionStorage.removeItem("emby-icons-admin-token");
+    window.location.assign("/admin.html?login=1");
+    throw new Error("登录已失效，请重新登录");
+  }
+  if (!response.ok) throw new Error(body.error || `远程地址操作失败 (${response.status})`);
+  return body;
+}
+
+function updateRemoteEditorState() {
+  elements.remoteEditCancel.hidden = !editingRemoteUrlId;
+  if (!elements.remoteSaveButton.disabled) {
+    elements.remoteSaveButton.textContent = editingRemoteUrlId ? "更新地址" : "保存地址";
+  }
+}
+
+function resetRemoteEditor() {
+  editingRemoteUrlId = null;
+  updateRemoteEditorState();
+}
+
+function useSavedRemoteUrl(item) {
+  resetRemoteEditor();
+  setRemoteUrlError("");
+  elements.remoteUrl.value = item.url;
+  elements.remoteUrl.focus();
+}
+
+function editSavedRemoteUrl(item) {
+  setRemoteUrlError("");
+  editingRemoteUrlId = item.id;
+  elements.remoteUrl.value = item.url;
+  updateRemoteEditorState();
+  elements.remoteUrl.focus();
+  elements.remoteUrl.select();
+}
+
+function renderRemoteUrlHistory() {
+  const count = savedRemoteUrls.length;
+  elements.remoteHistoryCount.textContent = String(count);
+  elements.remoteHistoryEmpty.hidden = remoteUrlsLoading || count > 0;
+  elements.remoteHistoryEmpty.textContent = remoteUrlsLoading ? "正在读取已保存地址..." : "暂无已保存地址，填写上方地址后点击“保存地址”。";
+  elements.remoteHistoryList.replaceChildren();
+
+  for (const item of savedRemoteUrls) {
+    const row = document.createElement("div");
+    row.className = "remote-history-item";
+
+    const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.className = "remote-history-use";
+    useButton.textContent = item.url;
+    useButton.title = `使用 ${item.url}`;
+    useButton.setAttribute("aria-label", `使用已保存地址 ${item.url}`);
+    useButton.addEventListener("click", () => useSavedRemoteUrl(item));
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "remote-history-action";
+    editButton.textContent = "编辑";
+    editButton.title = "编辑此地址";
+    editButton.setAttribute("aria-label", `编辑已保存地址 ${item.url}`);
+    editButton.addEventListener("click", () => editSavedRemoteUrl(item));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "remote-history-action danger";
+    deleteButton.textContent = "删除";
+    deleteButton.title = "删除此地址";
+    deleteButton.setAttribute("aria-label", `删除已保存地址 ${item.url}`);
+    deleteButton.addEventListener("click", () => {
+      if (!window.confirm(`删除已保存的远程地址吗？\n\n${item.url}`)) return;
+      deleteSavedRemoteUrl(item);
+    });
+
+    row.append(useButton, editButton, deleteButton);
+    elements.remoteHistoryList.append(row);
+  }
+
+  if (editingRemoteUrlId && !savedRemoteUrls.some((item) => item.id === editingRemoteUrlId)) {
+    editingRemoteUrlId = null;
+  }
+  updateRemoteEditorState();
+}
+
+async function loadRemoteUrls({ quiet = false } = {}) {
+  if (remoteUrlsLoading) return;
+  remoteUrlsLoading = true;
+  setRemoteHistoryError("");
+  if (!quiet) renderRemoteUrlHistory();
+
+  try {
+    const body = await remoteJsonUrlRequest();
+    savedRemoteUrls = (Array.isArray(body.items) ? body.items : [])
+      .filter((item) => item && typeof item.id === "string" && typeof item.url === "string");
+    if (!elements.remoteUrl.value && savedRemoteUrls[0]) elements.remoteUrl.value = savedRemoteUrls[0].url;
+  } catch (error) {
+    setRemoteHistoryError(error.message || "读取已保存地址失败");
+  } finally {
+    remoteUrlsLoading = false;
+    renderRemoteUrlHistory();
+  }
+}
+
+async function saveRemoteUrl() {
+  const url = normalizeRemoteUrl(elements.remoteUrl.value);
+  if (!url) {
+    setRemoteUrlError("请输入有效的 HTTP 或 HTTPS 远程地址");
+    elements.remoteUrl.focus();
+    return;
+  }
+
+  const editingId = editingRemoteUrlId;
+  elements.remoteUrl.value = url;
+  setRemoteUrlError("");
+  setRemoteHistoryError("");
+  elements.remoteSaveButton.disabled = true;
+  elements.remoteSaveButton.textContent = editingId ? "更新中..." : "保存中...";
+
+  try {
+    const body = await remoteJsonUrlRequest(editingId ? `/${encodeURIComponent(editingId)}` : "", {
+      method: editingId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const item = body.item;
+    if (!item || typeof item.id !== "string") throw new Error("远程地址保存响应无效");
+
+    if (editingId) {
+      const index = savedRemoteUrls.findIndex((saved) => saved.id === editingId);
+      if (index >= 0) savedRemoteUrls[index] = item;
+      else savedRemoteUrls.unshift(item);
+      editingRemoteUrlId = null;
+      showToast("已更新远程 JSON 地址");
+    } else {
+      savedRemoteUrls = savedRemoteUrls.filter((saved) => saved.id !== item.id);
+      savedRemoteUrls.unshift(item);
+      showToast("已保存远程 JSON 地址");
+    }
+    elements.remoteUrl.value = item.url;
+    renderRemoteUrlHistory();
+  } catch (error) {
+    setRemoteUrlError(error.message || "远程地址保存失败");
+  } finally {
+    elements.remoteSaveButton.disabled = false;
+    updateRemoteEditorState();
+  }
+}
+
+async function deleteSavedRemoteUrl(item) {
+  setRemoteHistoryError("");
+  try {
+    await remoteJsonUrlRequest(`/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    savedRemoteUrls = savedRemoteUrls.filter((saved) => saved.id !== item.id);
+    if (editingRemoteUrlId === item.id) editingRemoteUrlId = null;
+    renderRemoteUrlHistory();
+    showToast("已删除远程 JSON 地址");
+  } catch (error) {
+    setRemoteHistoryError(error.message || "删除远程地址失败");
+  }
+}
 function openImportDialog() {
+  resetRemoteEditor();
+  setRemoteUrlError("");
+  setRemoteHistoryError("");
   elements.importError.textContent = "";
   elements.importFile.value = "";
   elements.importEditor.value = "";
-  elements.remoteUrl.value = "";
+  elements.remoteUrl.value = savedRemoteUrls[0]?.url || "";
+  renderRemoteUrlHistory();
   elements.importDialog.showModal();
-  elements.importFile.focus();
+  elements.remoteUrl.focus();
+  loadRemoteUrls({ quiet: true });
 }
 
 async function importDocument(event) {
@@ -325,36 +538,38 @@ async function importDocument(event) {
 }
 
 async function fetchRemoteJson() {
-  const remoteUrl = elements.remoteUrl.value.trim();
-  if (!/^https?:\/\//i.test(remoteUrl)) {
-    elements.importError.textContent = "请输入 HTTP 或 HTTPS 远程地址";
+  const remoteUrl = normalizeRemoteUrl(elements.remoteUrl.value);
+  if (!remoteUrl) {
+    setRemoteUrlError("请输入有效的 HTTP 或 HTTPS 远程地址");
+    elements.remoteUrl.focus();
     return;
   }
-
-  const token = sessionStorage.getItem("emby-icons-admin-token") || "";
+  elements.remoteUrl.value = remoteUrl;
 
   elements.remoteFetchButton.disabled = true;
   elements.remoteFetchButton.textContent = "获取中...";
+  setRemoteUrlError("");
   elements.importError.textContent = "";
   try {
     const response = await fetch("/api/import", {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
+      credentials: "same-origin",
+      headers: remoteAdminHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ url: remoteUrl }),
     });
     const body = await response.json().catch(() => ({}));
     if (response.status === 401) {
       sessionStorage.removeItem("emby-icons-admin-token");
-      throw new Error(body.error || "管理员令牌无效");
+      window.location.assign("/admin.html?login=1");
+      return;
     }
     if (!response.ok) throw new Error(body.error || `远程请求失败 (${response.status})`);
     const icons = parseImportedIcons(JSON.stringify(body.value));
-    if (token) sessionStorage.setItem("emby-icons-admin-token", token);
     elements.importEditor.value = `${JSON.stringify({ icons }, null, 2)}\n`;
     elements.importFile.value = "";
-    showToast(`已获取 ${icons.length} 个远程图标，请点击导入并保存`);
+    showToast(`已获取 ${icons.length} 个远程图标；可先点击“保存地址”收藏，再点击“导入并保存”写入图标库`);
   } catch (error) {
-    elements.importError.textContent = error.message;
+    setRemoteUrlError(error.message);
   } finally {
     elements.remoteFetchButton.disabled = false;
     elements.remoteFetchButton.textContent = "获取远程 JSON";
@@ -849,7 +1064,19 @@ elements.importCloseButton.addEventListener("click", () => elements.importDialog
 elements.exportButton.addEventListener("click", exportDocument);
 elements.copyButton.addEventListener("click", copyDocument);
 elements.copyPublicButton.addEventListener("click", copyPublicConfig);
+elements.remoteSaveButton.addEventListener("click", saveRemoteUrl);
 elements.remoteFetchButton.addEventListener("click", fetchRemoteJson);
+elements.remoteEditCancel.addEventListener("click", () => {
+  resetRemoteEditor();
+  setRemoteUrlError("");
+});
+elements.remoteHistoryRefresh.addEventListener("click", () => loadRemoteUrls({ quiet: true }));
+elements.remoteUrl.addEventListener("input", () => setRemoteUrlError(""));
+elements.remoteUrl.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || elements.remoteFetchButton.disabled) return;
+  event.preventDefault();
+  fetchRemoteJson();
+});
 elements.reloadButton.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictReload.addEventListener("click", () => loadDocument({ confirmDiscard: true }));
 elements.conflictForce.addEventListener("click", () => {
@@ -935,3 +1162,7 @@ window.embyIconsAdmin = {
 
 updateSearchClearButton();
 loadDocument();
+
+
+
+

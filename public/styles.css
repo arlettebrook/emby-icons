@@ -1054,12 +1054,166 @@ dialog form {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 
-.remote-fetch-button {
+.remote-import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.remote-import-actions .button {
   min-height: 42px;
   white-space: nowrap;
+}
+
+.remote-import-actions .button[hidden] {
+  display: none;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.remote-url-error {
+  margin: -2px 0 14px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.remote-url-error[hidden],
+.remote-history-error[hidden] {
+  display: none;
+}
+
+.remote-history {
+  margin: 0 0 18px;
+  padding: 9px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--accent-soft);
+}
+
+.remote-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.remote-history-count {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  margin-left: 2px;
+  padding: 0 5px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent-strong);
+  font: 10px/1 "Cascadia Code", Consolas, monospace;
+}
+
+.remote-history-refresh {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.remote-history-refresh:hover {
+  color: var(--accent-strong);
+}
+
+.remote-history-empty,
+.remote-history-error {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.remote-history-error {
+  color: var(--danger);
+}
+
+.remote-history-empty[hidden] {
+  display: none;
+}
+
+.remote-history-list {
+  max-height: 160px;
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  overflow: auto;
+}
+
+.remote-history-list:empty {
+  display: none;
+}
+
+.remote-history-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.remote-history-use {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 7px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: 11px/1.35 "Cascadia Code", Consolas, monospace;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-history-use:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--accent-strong);
+}
+
+.remote-history-action {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.remote-history-action:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--accent-strong);
+}
+
+.remote-history-action.danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+  color: var(--danger);
 }
 
 .import-file-field {
@@ -1283,8 +1437,13 @@ dialog form {
     grid-template-columns: 1fr;
   }
 
-  .remote-fetch-button {
-    width: 100%;
+  .remote-import-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .remote-import-actions .button {
+    flex: 1 1 130px;
   }
 
   .json-toolbar {
@@ -2873,3 +3032,4 @@ body.has-unsaved-changes #save-button:not(:disabled) {
     font-size: 11px;
   }
 }
+

@@ -1,4 +1,5 @@
 import { hasAdminAccess } from "../_shared/admin.js";
+import { validateRemoteUrl } from "../_shared/remote-json-urls.js";
 
 const MAX_REQUEST_BYTES = 8 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -20,30 +21,6 @@ function response(request, body, init = {}) {
   const origin = request.headers.get("Origin");
   if (origin === new URL(request.url).origin) headers.set("Access-Control-Allow-Origin", origin);
   return new Response(JSON.stringify(body), { ...init, headers });
-}
-
-function isBlockedHostname(hostname) {
-  const host = hostname.toLowerCase().replace(/[\[\]]/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
-  if (host === "::1" || host === "0.0.0.0" || host === "127.0.0.1") return true;
-  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!ipv4) return false;
-  const [a, b] = ipv4.slice(1, 3).map(Number);
-  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0 || (a === 169 && b === 254);
-}
-
-function validateRemoteUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return { error: "Remote URL is invalid" };
-  }
-  if (!["http:", "https:"].includes(url.protocol)) return { error: "Remote URL must use HTTP or HTTPS" };
-  if (url.username || url.password) return { error: "Remote URL must not contain credentials" };
-  if (url.port && !["80", "443"].includes(url.port)) return { error: "Remote URL uses an unsupported port" };
-  if (isBlockedHostname(url.hostname)) return { error: "Remote URL points to a private or local host" };
-  return { url };
 }
 
 async function readRequestUrl(request) {
@@ -112,3 +89,4 @@ export async function onRequestPost({ request, env }) {
 export function onRequestOptions({ request }) {
   return new Response(null, { status: 204, headers: { ...corsHeaders, "Access-Control-Allow-Origin": new URL(request.url).origin } });
 }
+
