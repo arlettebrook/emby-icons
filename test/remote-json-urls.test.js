@@ -241,6 +241,16 @@ test("admin import UI exposes note editing and direct saved-address fetch contro
   assert.match(script, /remote-history-action remote-history-fetch/);
 });
 
+test("admin import UI clears address inputs after updating or cancelling an edit", async () => {
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(
+    script,
+    /function resetRemoteEditor\(\{ clearInputs = true \} = \{\}\) \{\s*editingRemoteUrlId = null;\s*if \(clearInputs\) \{\s*elements\.remoteUrl\.value = "";\s*elements\.remoteNote\.value = "";/,
+  );
+  assert.match(script, /resetRemoteEditor\(\);\s*showToast\("已更新远程 JSON 地址"\)/);
+  assert.match(script, /remoteEditCancel\.addEventListener\("click", \(\) => \{\s*resetRemoteEditor\(\);/);
+});
+
 test("admin import UI distinguishes fetched JSON from manual input", async () => {
   const [html, script] = await Promise.all([
     readFile(new URL("../public/admin.html", import.meta.url), "utf8"),

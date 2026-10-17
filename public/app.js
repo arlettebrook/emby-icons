@@ -391,8 +391,12 @@ function updateRemoteEditorState() {
   }
 }
 
-function resetRemoteEditor() {
+function resetRemoteEditor({ clearInputs = true } = {}) {
   editingRemoteUrlId = null;
+  if (clearInputs) {
+    elements.remoteUrl.value = "";
+    elements.remoteNote.value = "";
+  }
   updateRemoteEditorState();
 }
 
@@ -571,15 +575,17 @@ async function saveRemoteUrl() {
       const index = savedRemoteUrls.findIndex((saved) => saved.id === editingId);
       if (index >= 0) savedRemoteUrls[index] = item;
       else savedRemoteUrls.unshift(item);
-      editingRemoteUrlId = null;
+      resetRemoteEditor();
       showToast("已更新远程 JSON 地址");
     } else {
       savedRemoteUrls = savedRemoteUrls.filter((saved) => saved.id !== item.id);
       savedRemoteUrls.unshift(item);
       showToast("已保存远程 JSON 地址");
     }
-    elements.remoteUrl.value = item.url;
-    elements.remoteNote.value = item.note || "";
+    if (!editingId) {
+      elements.remoteUrl.value = item.url;
+      elements.remoteNote.value = item.note || "";
+    }
     remoteUrlsEtag = etag;
     remoteUrlsLoadedAt = Date.now();
     renderRemoteUrlHistory();
@@ -613,8 +619,6 @@ function openImportDialog() {
   elements.importFile.value = "";
   elements.importEditor.value = "";
   clearImportSourceStatus();
-  elements.remoteUrl.value = "";
-  elements.remoteNote.value = "";
   renderRemoteUrlHistory();
   elements.importDialog.showModal();
   elements.remoteUrl.focus();
@@ -1231,6 +1235,7 @@ elements.remoteFetchButton.addEventListener("click", () => fetchRemoteJson());
 elements.remoteEditCancel.addEventListener("click", () => {
   resetRemoteEditor();
   setRemoteUrlError("");
+  elements.remoteUrl.focus();
 });
 elements.remoteHistoryRefresh.addEventListener("click", () => loadRemoteUrls({ quiet: true, force: true }));
 elements.remoteHistoryList.addEventListener("click", (event) => {
