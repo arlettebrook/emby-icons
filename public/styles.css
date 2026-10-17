@@ -1100,10 +1100,11 @@ dialog form {
 
 .remote-history {
   margin: 0 0 18px;
-  padding: 9px 10px 10px;
+  padding: 12px 12px 13px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--accent-soft);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f9fdff 0%, #f4fbfe 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%), 0 6px 18px rgb(15 23 42 / 4%);
 }
 
 .remote-history-heading {
@@ -1111,42 +1112,56 @@ dialog form {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
+  padding: 0 2px;
+  color: #334155;
+  font-size: 11.5px;
+  font-weight: 700;
 }
 
 .remote-history-count {
-  min-width: 18px;
-  height: 18px;
+  min-width: 20px;
+  height: 20px;
   display: inline-grid;
-  margin-left: 2px;
-  padding: 0 5px;
+  margin-left: 3px;
+  padding: 0 6px;
   place-items: center;
-  border: 1px solid var(--line);
+  border: 1px solid #b9e6f5;
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--accent-strong);
-  font: 10px/1 "Cascadia Code", Consolas, monospace;
+  background: #e0f5fd;
+  color: #0369a1;
+  font: 700 10px/1 "Cascadia Code", Consolas, monospace;
 }
 
 .remote-history-refresh {
-  padding: 3px 5px;
-  border: 0;
-  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   font-size: 11px;
+  font-weight: 600;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.remote-history-refresh::before {
+  content: "↻";
+  font-size: 13px;
+  line-height: 1;
 }
 
 .remote-history-refresh:hover {
-  color: var(--accent-strong);
+  border-color: var(--line);
+  background: #e9f8fe;
+  color: #0284c7;
 }
 
 .remote-history-empty,
 .remote-history-error {
-  margin: 8px 0 0;
+  margin: 8px 2px 0;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
@@ -1163,8 +1178,8 @@ dialog form {
 .remote-history-list {
   max-height: 240px;
   display: grid;
-  gap: 6px;
-  margin-top: 7px;
+  gap: 8px;
+  margin-top: 10px;
   overflow: auto;
 }
 
@@ -1174,39 +1189,58 @@ dialog form {
 
 .remote-history-item {
   min-width: 0;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 5px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: rgb(9 18 33 / 28%);
-  transition: border-color 150ms ease, background 150ms ease;
+  gap: 10px;
+  padding: 10px 10px 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 2px 7px rgb(15 23 42 / 4%);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.remote-history-item::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #7dd3fc, #22d3ee);
+  opacity: 0.72;
+  transition: opacity 150ms ease;
 }
 
 .remote-history-item:hover {
-  border-color: var(--line);
-  background: rgb(9 18 33 / 44%);
+  border-color: #b9e6f5;
+  box-shadow: 0 7px 18px rgb(14 165 233 / 9%);
+}
+
+.remote-history-item:hover::before {
+  opacity: 1;
 }
 
 .remote-history-use {
   min-width: 0;
   display: grid;
-  gap: 2px;
-  padding: 5px 7px;
+  gap: 3px;
+  padding: 3px 5px 3px 7px;
   overflow: hidden;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+  transition: background 150ms ease;
 }
 
 .remote-history-use:hover {
-  border-color: var(--line-strong);
-  background: var(--surface);
+  background: #f4fbfe;
 }
 
 .remote-history-note,
@@ -1219,48 +1253,57 @@ dialog form {
 }
 
 .remote-history-note {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 650;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
   line-height: 1.35;
 }
 
 .remote-history-note.is-empty {
-  color: var(--muted);
-  font-weight: 500;
+  color: #94a3b8;
+  font-weight: 600;
 }
 
 .remote-history-url {
-  color: var(--muted);
-  font: 10.5px/1.4 "Cascadia Code", Consolas, monospace;
+  color: #64748b;
+  font: 10.5px/1.45 "Cascadia Code", Consolas, monospace;
 }
 
 .remote-history-use:hover .remote-history-url {
-  color: var(--accent);
+  color: #0284c7;
 }
 
 .remote-history-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f7fcfe;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 95%);
 }
 
 .remote-history-action {
   min-height: 30px;
   flex: 0 0 auto;
-  padding: 5px 8px;
+  padding: 5px 9px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: #64748b;
   cursor: pointer;
   font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
 
 .remote-history-action:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  background: var(--surface);
-  color: var(--accent-strong);
+  border-color: var(--line);
+  background: #fff;
+  color: #0284c7;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 7%);
 }
 
 .remote-history-action:disabled {
@@ -1269,15 +1312,25 @@ dialog form {
 }
 
 .remote-history-fetch {
-  border-color: rgb(120 174 252 / 34%);
-  background: rgb(120 174 252 / 12%);
-  color: var(--accent);
-  font-weight: 650;
+  border-color: transparent;
+  background: linear-gradient(180deg, #38bdf8, #0ea5e9);
+  color: #fff;
+  box-shadow: 0 2px 6px rgb(14 165 233 / 24%);
+  font-weight: 700;
+}
+
+.remote-history-fetch:hover:not(:disabled) {
+  border-color: transparent;
+  background: linear-gradient(180deg, #0ea5e9, #0284c7);
+  color: #fff;
+  box-shadow: 0 3px 8px rgb(2 132 199 / 24%);
 }
 
 .remote-history-action.danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: #fff1f4;
   color: var(--danger);
+  box-shadow: none;
 }
 
 .import-file-field {
@@ -1508,16 +1561,18 @@ dialog form {
 
   .remote-history-item {
     grid-template-columns: 1fr;
-    gap: 6px;
+    gap: 8px;
+    padding: 10px 9px 9px 12px;
   }
 
   .remote-history-actions {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    padding-top: 6px;
+    gap: 2px;
+    padding: 3px;
     border-top: 1px solid var(--line);
+    border-radius: 8px;
   }
 
   .remote-history-action {
@@ -1584,11 +1639,11 @@ dialog form {
   }
 
   .remote-history-item {
-    padding: 4px;
+    padding: 8px 8px 8px 12px;
   }
 
   .remote-history-use {
-    padding-inline: 6px;
+    padding-inline: 5px;
   }
 
   .brand-mark {
