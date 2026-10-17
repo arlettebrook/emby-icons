@@ -11,7 +11,8 @@ const MAX_URL_LENGTH = 2048;
 function corsHeaders(request) {
   return {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-None-Match",
+    "Access-Control-Expose-Headers": "ETag",
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
     "Vary": "Origin",
@@ -26,6 +27,30 @@ function jsonResponse(request, body, init = {}) {
   const origin = request.headers.get("Origin");
   if (origin === new URL(request.url).origin) headers.set("Access-Control-Allow-Origin", origin);
   return new Response(JSON.stringify(body), { ...init, headers });
+}
+
+function storeEtag(store) {
+  const serialized = JSON.stringify(store);
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `W/"${(hash >>> 0).toString(36)}"`;
+}
+
+function matchesEtag(header, etag) {
+  if (!header) return false;
+  return header.split(",").some((value) => {
+    const candidate = value.trim();
+    return candidate === "*" || candidate === etag;
+  });
+}
+
+function notModifiedResponse(request, etag) {
+  const headers = new Headers(corsHeaders(request));
+  headers.set("ETag", etag);
+  return new Response(null, { status: 304, headers });
 }
 
 function httpError(status, message) {
@@ -168,7 +193,11 @@ export async function handleAdminRemoteJsonUrlCollection(request, env) {
 
   try {
     const store = await readStore(env);
-    if (request.method === "GET") return jsonResponse(request, store);
+    if (request.method === "GET") {
+      const etag = storeEtag(store);
+      if (matchesEtag(request.headers.get("If-None-Match"), etag)) return notModifiedResponse(request, etag);
+      return jsonResponse(request, store, { headers: { ETag: etag } });
+    }
 
     const { url, note } = await readBodyUrlAndNote(request);
     if (store.items.some((item) => item.url === url)) {
@@ -183,7 +212,10 @@ export async function handleAdminRemoteJsonUrlCollection(request, env) {
     store.items.unshift(item);
     store.updatedAt = now;
     await writeStore(env, store);
-    return jsonResponse(request, { item, count: store.items.length, updatedAt: store.updatedAt }, { status: 201 });
+    return jsonResponse(request, { item, count: store.items.length, updatedAt: store.updatedAt }, {
+      status: 201,
+      headers: { ETag: storeEtag(store) },
+    });
   } catch (error) {
     return errorResponse(request, error);
   }
@@ -205,12 +237,18 @@ export async function handleAdminRemoteJsonUrlItem(request, env, id) {
     if (index === -1) return jsonResponse(request, { error: "Remote URL not found" }, { status: 404 });
     const current = store.items[index];
 
-    if (request.method === "GET") return jsonResponse(request, { item: current });
+    if (request.method === "GET") {
+      const etag = storeEtag(store);
+      if (matchesEtag(request.headers.get("If-None-Match"), etag)) return notModifiedResponse(request, etag);
+      return jsonResponse(request, { item: current }, { headers: { ETag: etag } });
+    }
     if (request.method === "DELETE") {
       store.items.splice(index, 1);
       store.updatedAt = Date.now();
       await writeStore(env, store);
-      return jsonResponse(request, { ok: true, id: itemId, count: store.items.length, updatedAt: store.updatedAt });
+      return jsonResponse(request, { ok: true, id: itemId, count: store.items.length, updatedAt: store.updatedAt }, {
+        headers: { ETag: storeEtag(store) },
+      });
     }
 
     const { url, note } = await readBodyUrlAndNote(request, current.note);
@@ -221,7 +259,9 @@ export async function handleAdminRemoteJsonUrlItem(request, env, id) {
     store.items[index] = updated;
     store.updatedAt = updated.updatedAt;
     await writeStore(env, store);
-    return jsonResponse(request, { item: updated, count: store.items.length, updatedAt: store.updatedAt });
+    return jsonResponse(request, { item: updated, count: store.items.length, updatedAt: store.updatedAt }, {
+      headers: { ETag: storeEtag(store) },
+    });
   } catch (error) {
     return errorResponse(request, error);
   }

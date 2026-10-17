@@ -50,3 +50,39 @@ test("remote import blocks private hosts", async () => {
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /private|local/i);
 });
+
+test("remote import coalesces concurrent requests and reuses the short-lived cache", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    assert.equal(url.href, "https://cached.example.org/icons.json");
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return new Response(JSON.stringify({ icons: [{ name: "Cached", url: "https://cached.example.org/cached.png" }] }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const makeRequest = () => new Request("https://example.com/api/import", {
+    method: "POST",
+    headers: { Authorization: "Bearer secret", "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://cached.example.org/icons.json" }),
+  });
+  try {
+    const [first, second] = await Promise.all([
+      onRequestPost({ request: makeRequest(), env: { ADMIN_TOKEN: "secret" } }),
+      onRequestPost({ request: makeRequest(), env: { ADMIN_TOKEN: "secret" } }),
+    ]);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(calls, 1);
+    assert.equal((await first.json()).value.icons[0].name, "Cached");
+
+    const third = await onRequestPost({ request: makeRequest(), env: { ADMIN_TOKEN: "secret" } });
+    assert.equal(third.status, 200);
+    assert.equal((await third.json()).value.icons[0].name, "Cached");
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

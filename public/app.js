@@ -33,6 +33,10 @@ const elements = {
   importError: document.querySelector("#import-error"),
   importFile: document.querySelector("#import-file"),
   importForm: document.querySelector("#import-form"),
+  importSourceClear: document.querySelector("#import-source-clear"),
+  importSourceDetail: document.querySelector("#import-source-detail"),
+  importSourceStatus: document.querySelector("#import-source-status"),
+  importSourceTitle: document.querySelector("#import-source-title"),
   iconSort: document.querySelector("#icon-sort"),
   loadMoreButton: document.querySelector("#load-more-button"),
   remoteEditCancel: document.querySelector("#remote-edit-cancel"),
@@ -89,8 +93,13 @@ let pendingSearchDeleteIcons = [];
 
 const defaultSaveLabel = '<span class="button-icon" aria-hidden="true">↑</span>保存更改';
 const MAX_REMOTE_NOTE_LENGTH = 100;
+const REMOTE_URLS_FRESH_MS = 60_000;
 let savedRemoteUrls = [];
 let remoteUrlsLoading = false;
+let remoteUrlsEtag = "";
+let remoteUrlsLoadedAt = 0;
+let remoteUrlsRequest = null;
+let remoteHistoryRenderKey = "";
 let remoteFetching = false;
 let editingRemoteUrlId = null;
 
@@ -244,14 +253,7 @@ function confirmSearchDelete() {
   }
 }
 
-function parseImportedIcons(raw) {
-  let value;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new Error("JSON 格式无效");
-  }
-
+function normalizeImportedIcons(value) {
   const icons = Array.isArray(value) ? value : value?.icons;
   if (!Array.isArray(icons)) throw new Error("导入内容必须包含 icons 数组");
   return icons.map((icon, index) => {
@@ -266,6 +268,16 @@ function parseImportedIcons(raw) {
     }
     return { ...icon, name: icon.name.trim(), url: icon.url.trim() };
   });
+}
+
+function parseImportedIcons(raw) {
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("JSON 格式无效");
+  }
+  return normalizeImportedIcons(value);
 }
 
 function getSerializedDocument() {
@@ -309,26 +321,67 @@ function setRemoteHistoryError(message = "") {
   elements.remoteHistoryError.hidden = !message;
 }
 
+function clearImportSourceStatus() {
+  elements.importSourceStatus.hidden = true;
+  elements.importSourceTitle.textContent = "";
+  elements.importSourceDetail.textContent = "";
+}
+
+function showImportSourceStatus(icons, url, note = "") {
+  const normalizedNote = normalizeRemoteNote(note);
+  const source = normalizedNote ? `${normalizedNote} · ${url}` : url;
+  elements.importSourceTitle.textContent = `已获取 ${icons.length} 个远程图标`;
+  elements.importSourceDetail.textContent = `来源：${source}。内容已填入下方“JSON 内容”，确认后点击“导入并保存”。`;
+  elements.importSourceStatus.hidden = false;
+  requestAnimationFrame(() => {
+    elements.importSourceStatus.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+}
+
+function clearImportSourceResult() {
+  elements.importEditor.value = "";
+  elements.importFile.value = "";
+  elements.importError.textContent = "";
+  clearImportSourceStatus();
+  elements.importEditor.focus();
+}
+
 function remoteAdminHeaders(headers = {}) {
   const token = sessionStorage.getItem("emby-icons-admin-token") || "";
   return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers };
 }
 
-async function remoteJsonUrlRequest(path = "", { headers = {}, ...options } = {}) {
+async function remoteJsonUrlRequest(path = "", { headers = {}, allowNotModified = false, ...options } = {}) {
   const response = await fetch(`/api/admin/remote-json-urls${path}`, {
+    ...options,
     cache: "no-store",
     credentials: "same-origin",
-    ...options,
     headers: remoteAdminHeaders(headers),
   });
-  const body = await response.json().catch(() => ({}));
   if (response.status === 401) {
     sessionStorage.removeItem("emby-icons-admin-token");
     window.location.assign("/admin.html?login=1");
     throw new Error("登录已失效，请重新登录");
   }
+  const etag = response.headers.get("ETag") || "";
+  if (allowNotModified && response.status === 304) {
+    return { body: null, etag, notModified: true, response };
+  }
+  const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `远程地址操作失败 (${response.status})`);
-  return body;
+  return { body, etag, notModified: false, response };
+}
+
+function normalizeSavedRemoteUrls(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => item && typeof item.id === "string" && typeof item.url === "string")
+    .map((item) => ({
+      id: item.id,
+      url: item.url,
+      note: typeof item.note === "string" ? item.note : "",
+      createdAt: Number(item.createdAt) || 0,
+      updatedAt: Number(item.updatedAt) || 0,
+    }));
 }
 
 function updateRemoteEditorState() {
@@ -362,31 +415,40 @@ function editSavedRemoteUrl(item) {
 }
 
 function renderRemoteUrlHistory() {
+  if (editingRemoteUrlId && !savedRemoteUrls.some((item) => item.id === editingRemoteUrlId)) {
+    editingRemoteUrlId = null;
+  }
+
   const count = savedRemoteUrls.length;
   elements.remoteHistoryCount.textContent = String(count);
   elements.remoteHistoryEmpty.hidden = remoteUrlsLoading || count > 0;
   elements.remoteHistoryEmpty.textContent = remoteUrlsLoading ? "正在读取已保存地址..." : "暂无已保存地址，填写上方地址后点击“保存地址”。";
-  elements.remoteHistoryList.replaceChildren();
 
+  const renderKey = savedRemoteUrls
+    .map((item) => `${item.id}\u0000${item.url}\u0000${item.note || ""}`)
+    .join("\u0001");
+  if (renderKey === remoteHistoryRenderKey) {
+    updateRemoteEditorState();
+    return;
+  }
+  remoteHistoryRenderKey = renderKey;
+
+  const fragment = document.createDocumentFragment();
   for (const item of savedRemoteUrls) {
     const row = document.createElement("div");
     row.className = "remote-history-item";
+    row.dataset.id = item.id;
 
     const useButton = document.createElement("button");
     useButton.type = "button";
     useButton.className = "remote-history-use";
+    useButton.dataset.action = "use";
     useButton.title = item.note ? `使用 ${item.note}（${item.url}）` : `使用 ${item.url}`;
     useButton.setAttribute("aria-label", item.note ? `使用已保存地址 ${item.note}` : `使用已保存地址 ${item.url}`);
-    useButton.addEventListener("click", () => useSavedRemoteUrl(item));
 
     const note = document.createElement("span");
-    note.className = "remote-history-note";
-    if (item.note) {
-      note.textContent = item.note;
-    } else {
-      note.textContent = "未添加备注";
-      note.classList.add("is-empty");
-    }
+    note.className = item.note ? "remote-history-note" : "remote-history-note is-empty";
+    note.textContent = item.note || "未添加备注";
 
     const url = document.createElement("span");
     url.className = "remote-history-url";
@@ -399,63 +461,79 @@ function renderRemoteUrlHistory() {
     const fetchButton = document.createElement("button");
     fetchButton.type = "button";
     fetchButton.className = "remote-history-action remote-history-fetch";
+    fetchButton.dataset.action = "fetch";
     fetchButton.textContent = "获取";
     fetchButton.title = "直接获取此地址的远程 JSON";
     fetchButton.setAttribute("aria-label", `获取已保存地址 ${item.note || item.url}`);
     fetchButton.disabled = remoteFetching;
-    fetchButton.addEventListener("click", () => fetchSavedRemoteJson(item, fetchButton));
 
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.className = "remote-history-action";
+    editButton.dataset.action = "edit";
     editButton.textContent = "编辑";
     editButton.title = "编辑地址和备注";
     editButton.setAttribute("aria-label", `编辑已保存地址 ${item.note || item.url}`);
-    editButton.addEventListener("click", () => editSavedRemoteUrl(item));
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "remote-history-action danger";
+    deleteButton.dataset.action = "delete";
     deleteButton.textContent = "删除";
     deleteButton.title = "删除此地址";
     deleteButton.setAttribute("aria-label", `删除已保存地址 ${item.note || item.url}`);
-    deleteButton.addEventListener("click", () => {
-      const target = item.note ? `${item.note}\n${item.url}` : item.url;
-      if (!window.confirm(`删除已保存的远程地址吗？\n\n${target}`)) return;
-      deleteSavedRemoteUrl(item);
-    });
 
     actions.append(fetchButton, editButton, deleteButton);
     row.append(useButton, actions);
-    elements.remoteHistoryList.append(row);
+    fragment.append(row);
   }
-
-  if (editingRemoteUrlId && !savedRemoteUrls.some((item) => item.id === editingRemoteUrlId)) {
-    editingRemoteUrlId = null;
-  }
+  elements.remoteHistoryList.replaceChildren(fragment);
   updateRemoteEditorState();
 }
 
-async function loadRemoteUrls({ quiet = false } = {}) {
-  if (remoteUrlsLoading) return;
+function savedRemoteUrlFromEvent(event) {
+  const button = event.target.closest?.("button[data-action]");
+  if (!button || !elements.remoteHistoryList.contains(button)) return null;
+  const id = button.closest(".remote-history-item")?.dataset.id;
+  const item = id ? savedRemoteUrls.find((saved) => saved.id === id) : null;
+  return item ? { button, item } : null;
+}
+
+function remoteUrlsAreFresh() {
+  return remoteUrlsLoadedAt > 0 && Date.now() - remoteUrlsLoadedAt < REMOTE_URLS_FRESH_MS;
+}
+
+async function loadRemoteUrls({ quiet = false, force = false } = {}) {
+  if (remoteUrlsRequest) return remoteUrlsRequest;
+  if (!force && remoteUrlsAreFresh()) {
+    renderRemoteUrlHistory();
+    return;
+  }
+
   remoteUrlsLoading = true;
   setRemoteHistoryError("");
   if (!quiet) renderRemoteUrlHistory();
 
-  try {
-    const body = await remoteJsonUrlRequest();
-    savedRemoteUrls = (Array.isArray(body.items) ? body.items : [])
-      .filter((item) => item && typeof item.id === "string" && typeof item.url === "string");
-    if (!elements.remoteUrl.value && savedRemoteUrls[0]) {
-      elements.remoteUrl.value = savedRemoteUrls[0].url;
-      elements.remoteNote.value = savedRemoteUrls[0].note || "";
+  remoteUrlsRequest = (async () => {
+    try {
+      const result = await remoteJsonUrlRequest("", {
+        allowNotModified: true,
+        headers: remoteUrlsEtag ? { "If-None-Match": remoteUrlsEtag } : {},
+      });
+      remoteUrlsLoadedAt = Date.now();
+      if (result.etag) remoteUrlsEtag = result.etag;
+      if (result.notModified) return;
+
+      savedRemoteUrls = normalizeSavedRemoteUrls(result.body.items);
+    } catch (error) {
+      setRemoteHistoryError(error.message || "读取已保存地址失败");
+    } finally {
+      remoteUrlsLoading = false;
+      remoteUrlsRequest = null;
+      renderRemoteUrlHistory();
     }
-  } catch (error) {
-    setRemoteHistoryError(error.message || "读取已保存地址失败");
-  } finally {
-    remoteUrlsLoading = false;
-    renderRemoteUrlHistory();
-  }
+  })();
+  return remoteUrlsRequest;
 }
 
 async function saveRemoteUrl() {
@@ -481,7 +559,7 @@ async function saveRemoteUrl() {
   elements.remoteSaveButton.textContent = editingId ? "更新中..." : "保存中...";
 
   try {
-    const body = await remoteJsonUrlRequest(editingId ? `/${encodeURIComponent(editingId)}` : "", {
+    const { body, etag } = await remoteJsonUrlRequest(editingId ? `/${encodeURIComponent(editingId)}` : "", {
       method: editingId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, note }),
@@ -502,6 +580,8 @@ async function saveRemoteUrl() {
     }
     elements.remoteUrl.value = item.url;
     elements.remoteNote.value = item.note || "";
+    remoteUrlsEtag = etag;
+    remoteUrlsLoadedAt = Date.now();
     renderRemoteUrlHistory();
   } catch (error) {
     setRemoteUrlError(error.message || "远程地址保存失败");
@@ -514,9 +594,11 @@ async function saveRemoteUrl() {
 async function deleteSavedRemoteUrl(item) {
   setRemoteHistoryError("");
   try {
-    await remoteJsonUrlRequest(`/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    const { etag } = await remoteJsonUrlRequest(`/${encodeURIComponent(item.id)}`, { method: "DELETE" });
     savedRemoteUrls = savedRemoteUrls.filter((saved) => saved.id !== item.id);
     if (editingRemoteUrlId === item.id) editingRemoteUrlId = null;
+    remoteUrlsEtag = etag;
+    remoteUrlsLoadedAt = Date.now();
     renderRemoteUrlHistory();
     showToast("已删除远程 JSON 地址");
   } catch (error) {
@@ -530,12 +612,13 @@ function openImportDialog() {
   elements.importError.textContent = "";
   elements.importFile.value = "";
   elements.importEditor.value = "";
-  elements.remoteUrl.value = savedRemoteUrls[0]?.url || "";
-  elements.remoteNote.value = savedRemoteUrls[0]?.note || "";
+  clearImportSourceStatus();
+  elements.remoteUrl.value = "";
+  elements.remoteNote.value = "";
   renderRemoteUrlHistory();
   elements.importDialog.showModal();
   elements.remoteUrl.focus();
-  loadRemoteUrls({ quiet: true });
+  loadRemoteUrls();
 }
 
 async function importDocument(event) {
@@ -589,17 +672,18 @@ async function importDocument(event) {
   }
 }
 
-async function fetchRemoteJson(triggerButton = elements.remoteFetchButton) {
+async function fetchRemoteJson(triggerButton = elements.remoteFetchButton, sourceUrl = "", sourceNote = "") {
   if (remoteFetching) return;
-  const remoteUrl = normalizeRemoteUrl(elements.remoteUrl.value);
+  const hasExplicitUrl = Boolean(sourceUrl);
+  const remoteUrl = normalizeRemoteUrl(hasExplicitUrl ? sourceUrl : elements.remoteUrl.value);
   if (!remoteUrl) {
     setRemoteUrlError("请输入有效的 HTTP 或 HTTPS 远程地址");
-    elements.remoteUrl.focus();
+    if (!hasExplicitUrl) elements.remoteUrl.focus();
     return;
   }
   remoteFetching = true;
   const idleText = triggerButton.textContent;
-  elements.remoteUrl.value = remoteUrl;
+  if (!hasExplicitUrl) elements.remoteUrl.value = remoteUrl;
   elements.remoteFetchButton.disabled = true;
   elements.remoteHistoryList.querySelectorAll(".remote-history-fetch").forEach((button) => {
     button.disabled = true;
@@ -621,10 +705,11 @@ async function fetchRemoteJson(triggerButton = elements.remoteFetchButton) {
       return;
     }
     if (!response.ok) throw new Error(body.error || `远程请求失败 (${response.status})`);
-    const icons = parseImportedIcons(JSON.stringify(body.value));
+    const icons = normalizeImportedIcons(body.value);
     elements.importEditor.value = `${JSON.stringify({ icons }, null, 2)}\n`;
     elements.importFile.value = "";
-    showToast(`已获取 ${icons.length} 个远程图标；点击“导入并保存”写入图标库`);
+    showImportSourceStatus(icons, remoteUrl, hasExplicitUrl ? sourceNote : elements.remoteNote.value);
+    showToast(`已获取 ${icons.length} 个图标，结果已填入“JSON 内容”`);
   } catch (error) {
     setRemoteUrlError(error.message);
   } finally {
@@ -641,8 +726,7 @@ async function fetchRemoteJson(triggerButton = elements.remoteFetchButton) {
 }
 
 async function fetchSavedRemoteJson(item, triggerButton) {
-  useSavedRemoteUrl(item);
-  await fetchRemoteJson(triggerButton);
+  await fetchRemoteJson(triggerButton, item.url, item.note);
 }
 
 function exportDocument() {
@@ -1130,6 +1214,15 @@ elements.importButton.addEventListener("click", openImportDialog);
 elements.emptyImportButton.addEventListener("click", openImportDialog);
 elements.importCancelButton.addEventListener("click", () => elements.importDialog.close());
 elements.importCloseButton.addEventListener("click", () => elements.importDialog.close());
+elements.importSourceClear.addEventListener("click", clearImportSourceResult);
+elements.importEditor.addEventListener("input", () => {
+  clearImportSourceStatus();
+  elements.importError.textContent = "";
+});
+elements.importFile.addEventListener("change", () => {
+  clearImportSourceStatus();
+  elements.importError.textContent = "";
+});
 elements.exportButton.addEventListener("click", exportDocument);
 elements.copyButton.addEventListener("click", copyDocument);
 elements.copyPublicButton.addEventListener("click", copyPublicConfig);
@@ -1139,7 +1232,28 @@ elements.remoteEditCancel.addEventListener("click", () => {
   resetRemoteEditor();
   setRemoteUrlError("");
 });
-elements.remoteHistoryRefresh.addEventListener("click", () => loadRemoteUrls({ quiet: true }));
+elements.remoteHistoryRefresh.addEventListener("click", () => loadRemoteUrls({ quiet: true, force: true }));
+elements.remoteHistoryList.addEventListener("click", (event) => {
+  const target = savedRemoteUrlFromEvent(event);
+  if (!target) return;
+  const { button, item } = target;
+  switch (button.dataset.action) {
+    case "use":
+      useSavedRemoteUrl(item);
+      break;
+    case "fetch":
+      fetchSavedRemoteJson(item, button);
+      break;
+    case "edit":
+      editSavedRemoteUrl(item);
+      break;
+    case "delete": {
+      const label = item.note ? `${item.note}\n${item.url}` : item.url;
+      if (window.confirm(`删除已保存的远程地址吗？\n\n${label}`)) deleteSavedRemoteUrl(item);
+      break;
+    }
+  }
+});
 elements.remoteUrl.addEventListener("input", () => setRemoteUrlError(""));
 elements.remoteNote.addEventListener("input", () => setRemoteUrlError(""));
 elements.remoteUrl.addEventListener("keydown", (event) => {

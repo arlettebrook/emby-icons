@@ -1346,6 +1346,75 @@ dialog form {
   font: 12px/1.6 "Cascadia Code", Consolas, monospace;
 }
 
+.import-source-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 11px 12px;
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f0fdf9, #e8fbf3);
+  box-shadow: 0 4px 12px rgb(5 150 105 / 7%);
+}
+
+.import-source-status[hidden] {
+  display: none;
+}
+
+.import-source-status-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #6ee7b7;
+  border-radius: 50%;
+  background: #d1fae5;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.import-source-status-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.import-source-status-copy strong {
+  color: #065f46;
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.import-source-status-copy span {
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.import-source-clear {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #bbf7d0;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 72%);
+  color: #047857;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.import-source-clear:hover {
+  border-color: #6ee7b7;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgb(5 150 105 / 9%);
+}
+
 .secret-input {
   position: relative;
   display: flex;
@@ -1582,6 +1651,16 @@ dialog form {
 
   .remote-history-list {
     max-height: 300px;
+  }
+
+  .import-source-status {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .import-source-clear {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .json-toolbar {

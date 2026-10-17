@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20261017-ui28" />
+    <link rel="stylesheet" href="/styles.css?v=20261017-ui32" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -361,13 +361,22 @@
           <div class="remote-history-list" id="remote-history-list"></div>
           <p class="remote-history-error" id="remote-history-error" role="alert" hidden></p>
         </div>
+        <div class="import-source-status" id="import-source-status" role="status" aria-live="polite" hidden>
+          <span class="import-source-status-icon" aria-hidden="true">✓</span>
+          <div class="import-source-status-copy">
+            <strong id="import-source-title"></strong>
+            <span id="import-source-detail"></span>
+          </div>
+          <button class="import-source-clear" id="import-source-clear" type="button">清除结果</button>
+        </div>
         <label class="field import-file-field">
           <span>JSON 文件</span>
           <input id="import-file" type="file" accept=".json,application/json" />
         </label>
         <label class="field import-paste-field">
-          <span>粘贴 JSON</span>
-          <textarea id="import-editor" spellcheck="false" placeholder="{\n  &quot;name&quot;: &quot;Emby Icons&quot;,\n  &quot;description&quot;: &quot;&quot;,\n  &quot;icons&quot;: []\n}"></textarea>
+          <span>JSON 内容 <small class="field-optional">远程获取或手动粘贴</small></span>
+          <small class="field-hint" id="import-editor-hint">远程获取成功后，结果会自动填入这里；也可以直接粘贴 JSON。</small>
+          <textarea id="import-editor" spellcheck="false" aria-describedby="import-editor-hint" placeholder="{\n  &quot;name&quot;: &quot;Emby Icons&quot;,\n  &quot;description&quot;: &quot;&quot;,\n  &quot;icons&quot;: []\n}"></textarea>
         </label>
         <p class="dialog-error" id="import-error"></p>
         <div class="dialog-actions">
@@ -413,7 +422,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
-    <script type="module" src="/admin-entry.js?v=20261017-ui28"></script>
+    <script type="module" src="/admin-entry.js?v=20261017-ui32"></script>
   </body>
 </html>
 

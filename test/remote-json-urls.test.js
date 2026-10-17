@@ -235,7 +235,23 @@ test("admin import UI exposes note editing and direct saved-address fetch contro
   assert.match(html, /id="remote-note"/);
   assert.match(html, /maxlength="100"/);
   assert.match(script, /function fetchSavedRemoteJson\(/);
+  assert.match(script, /fetchRemoteJson\(triggerButton, item\.url, item\.note\)/);
+  assert.doesNotMatch(script, /useSavedRemoteUrl\(item\);\s*await fetchRemoteJson/);
+  assert.doesNotMatch(script, /elements\.remoteUrl\.value = savedRemoteUrls\[0\]/);
   assert.match(script, /remote-history-action remote-history-fetch/);
+});
+
+test("admin import UI distinguishes fetched JSON from manual input", async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL("../public/admin.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /id="import-source-status"/);
+  assert.match(html, /id="import-source-clear"/);
+  assert.match(html, /JSON 内容 <small class="field-optional">远程获取或手动粘贴<\/small>/);
+  assert.doesNotMatch(html, />粘贴 JSON</);
+  assert.match(script, /function showImportSourceStatus\(/);
+  assert.match(script, /内容已填入下方“JSON 内容”/);
 });
 
 test("unknown remote JSON URL ids return 404", async () => {
@@ -291,4 +307,48 @@ test("admin remote JSON route modules expose the expected Pages handlers", () =>
   ]) {
     assert.equal(typeof handler, "function");
   }
+});
+
+test("saved remote JSON URL list supports ETag revalidation", async () => {
+  const env = createEnvironment();
+  const createdResponse = await handleAdminRemoteJsonUrlCollection(
+    collectionRequest("POST", { url: "https://example.com/etag-icons.json", note: "ETag" }),
+    env,
+  );
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.ok(createdResponse.headers.get("ETag"));
+
+  const first = await handleAdminRemoteJsonUrlCollection(collectionRequest(), env);
+  assert.equal(first.status, 200);
+  const etag = first.headers.get("ETag");
+  assert.ok(etag);
+  assert.equal(first.headers.get("Access-Control-Expose-Headers"), "ETag");
+  await first.json();
+
+  const revalidated = await handleAdminRemoteJsonUrlCollection(
+    collectionRequest("GET", undefined, adminHeaders({ "If-None-Match": etag })),
+    env,
+  );
+  assert.equal(revalidated.status, 304);
+  assert.equal(revalidated.headers.get("ETag"), etag);
+  assert.equal(await revalidated.text(), "");
+
+  await handleAdminRemoteJsonUrlItem(
+    itemRequest(created.item.id, "PUT", { url: created.item.url, note: "Changed" }),
+    env,
+    created.item.id,
+  );
+  const changed = await handleAdminRemoteJsonUrlCollection(collectionRequest(), env);
+  assert.equal(changed.status, 200);
+  assert.notEqual(changed.headers.get("ETag"), etag);
+});
+
+test("admin import UI reuses the saved-address cache and delegates history actions", async () => {
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(script, /If-None-Match/);
+  assert.match(script, /REMOTE_URLS_FRESH_MS/);
+  assert.match(script, /remoteHistoryList\.addEventListener\("click"/);
+  assert.match(script, /normalizeImportedIcons\(body\.value\)/);
+  assert.doesNotMatch(script, /parseImportedIcons\(JSON\.stringify\(body\.value\)\)/);
 });
