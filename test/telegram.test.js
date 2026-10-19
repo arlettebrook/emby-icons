@@ -58,6 +58,14 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   assert.equal(body.enabled, true);
   const setWebhook = mock.calls.find((call) => call.method === "setWebhook");
   assert.ok(setWebhook, "expected a setWebhook call");
+  const menuButton = mock.method("setChatMenuButton").at(-1);
+  assert.ok(menuButton, "expected a submit menu button");
+  assert.equal(menuButton.payload.menu_button.type, "web_app");
+  assert.equal(menuButton.payload.menu_button.text, "提交图标");
+  assert.equal(
+    menuButton.payload.menu_button.web_app.url,
+    "https://t.me/emby_icons_bot/submit?startapp=menu",
+  );
   return String(setWebhook.payload.url).slice(String(setWebhook.payload.url).lastIndexOf("/") + 1);
 }
 
@@ -89,6 +97,13 @@ function lastReviewEdit(messageId = 10) {
 
 function lastCardSend() {
   return mock.calls.filter((call) => call.method === "sendPhoto" || call.method === "sendMessage").at(-1);
+}
+
+function lastSubmissionEntry() {
+  return mock.method("sendMessage").filter((call) =>
+    call.payload.reply_markup?.inline_keyboard?.flat()
+      .some((button) => String(button.url || "").includes("t.me/emby_icons_bot/submit"))
+  ).at(-1);
 }
 
 function cardText(call) {
@@ -795,6 +810,15 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.equal(forward.payload.chat_id, "9001");
     assert.equal(forward.payload.from_chat_id, "@MikuNaNChannel");
     assert.equal(forward.payload.message_id, 8);
+    const entry = lastSubmissionEntry();
+    assert.ok(entry, "expected a submission entry after the announcement");
+    assert.equal(entry.payload.chat_id, "9001");
+    assert.match(entry.payload.text, /审核通过后会收录到公开图标库/);
+    assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "🖼 提交图标");
+    assert.equal(
+      entry.payload.reply_markup.inline_keyboard[0][0].url,
+      "https://t.me/emby_icons_bot/submit?startapp=channel8",
+    );
   } finally {
     mock.restore();
   }
@@ -833,6 +857,7 @@ test("the announcement falls back to copyMessage when forwarding is blocked", as
     assert.equal(copy.payload.chat_id, "9002");
     assert.equal(copy.payload.from_chat_id, "@MikuNaNChannel");
     assert.equal(copy.payload.message_id, 8);
+    assert.ok(lastSubmissionEntry(), "expected a submission entry after the copied announcement");
   } finally {
     mock.restore();
   }
@@ -852,14 +877,64 @@ test("the admin sees why the announcement could not be forwarded", async () => {
 
     await message(secret, env, "/help", 26);
 
-    const send = mock.method("sendMessage").at(-1);
+    const send = mock.method("sendMessage").find((call) =>
+      !call.payload.reply_markup && /MikuNaNChannel\/8/.test(call.payload.text)
+    );
     assert.match(send.payload.text, /MikuNaNChannel\/8/);
-    assert.match(send.payload.text, /公告转发失败/);
-    assert.match(send.payload.text, /message can't be forwarded/);
-    assert.match(send.payload.text, /chat not found/);
+    assert.match(send.payload.text, /公告转发失败\n转发：message can't be forwarded\n复制：chat not found/);
+    assert.doesNotMatch(send.payload.text, /Bad Request/);
+    assert.ok(lastSubmissionEntry(), "expected a submission entry after the link fallback");
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-announcement-failed");
     assert.ok(audit, "expected the failure to be recorded");
     assert.match(audit.detailsJson, /chat not found/);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a failed submission entry stays best-effort and is recorded", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method, payload) => (
+      method === "sendMessage" && payload.reply_markup ? "Bad Request: inline keyboard URL is invalid" : undefined
+    ),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    const response = await message(secret, env, "/start", 27, { userId: "9005", chatId: "9005" });
+
+    assert.equal(response.status, 200);
+    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-submit-entry-failed");
+    assert.ok(audit, "expected the entry failure to be recorded");
+    assert.match(audit.detailsJson, /inline keyboard URL is invalid/);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a failed menu button does not block saving Telegram settings", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => (method === "setChatMenuButton" ? "Bad Request: menu button URL is invalid" : undefined),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: true, chatId: CHAT_ID, botToken: BOT_TOKEN }),
+      }),
+      env,
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.webhookConfigured, true);
+    assert.equal(body.menuConfigured, false);
+    assert.match(body.warning, /提交图标.*菜单设置失败/);
+    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-submit-menu-failed");
+    assert.ok(audit, "expected the menu failure to be recorded");
   } finally {
     mock.restore();
   }

@@ -4,6 +4,7 @@ const result = document.querySelector("#result");
 const nameInput = document.querySelector("#name");
 const nameHint = document.querySelector("#name-hint");
 const nameExample = document.querySelector("#name-example");
+const miniAppSourceHint = document.querySelector("#mini-app-source");
 let turnstileToken = "";
 let turnstileWidgetId = null;
 
@@ -326,6 +327,18 @@ function initTelegramWebApp() {
     document.documentElement.classList.add("telegram-webapp");
   } catch {
     // 旧版本 SDK 或非 Telegram 环境：忽略即可。
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const startParam = String(
+      tg.initDataUnsafe?.start_param ||
+      params.get("tgWebAppStartParam") ||
+      params.get("startapp") ||
+      "",
+    ).trim();
+    if (startParam === "channel8" && miniAppSourceHint) miniAppSourceHint.hidden = false;
+  } catch {
+    // 来源提示只是附加信息，读取失败时不影响提交。
   }
 }
 

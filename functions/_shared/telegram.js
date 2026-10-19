@@ -5,6 +5,9 @@ const SETTINGS_KEY = "settings/telegram.json";
 const ANNOUNCEMENT_CHANNEL = "@MikuNaNChannel";
 const ANNOUNCEMENT_MESSAGE_ID = 8;
 const ANNOUNCEMENT_URL = "https://t.me/MikuNaNChannel/8";
+const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
+const SUBMIT_ENTRY_URL = `${SUBMIT_MINI_APP_URL}?startapp=channel8`;
+const SUBMIT_MENU_URL = `${SUBMIT_MINI_APP_URL}?startapp=menu`;
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TOKEN_LENGTH = 256;
 const MAX_CHAT_ID_LENGTH = 256;
@@ -149,6 +152,16 @@ async function setTelegramWebhook(token, origin, secret) {
   });
 }
 
+async function setTelegramSubmitMenuButton(token) {
+  await telegramApi(token, "setChatMenuButton", {
+    menu_button: {
+      type: "web_app",
+      text: "提交图标",
+      web_app: { url: SUBMIT_MENU_URL },
+    },
+  });
+}
+
 async function ensureWebhookForSettings(env, settings, origin) {
   if (settings.webhookSecret || !origin) return false;
   const webhookSecret = createSecret();
@@ -175,6 +188,30 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
   });
 }
 
+// 公告和提交入口是两条消息：Telegram 不允许给已转发的频道消息追加按钮，
+// 因此用一条独立的轻提示承载 Mini App 入口，普通用户和群聊都能使用。
+async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
+  try {
+    await telegramApi(token, "sendMessage", {
+      chat_id: chatId,
+      text: "需要提交图标？点击下方按钮，审核通过后会收录到公开图标库。",
+      disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      reply_markup: {
+        inline_keyboard: [[{ text: "🖼 提交图标", url: SUBMIT_ENTRY_URL }]],
+      },
+    });
+  } catch (error) {
+    // 入口是公告之外的附加引导，失败时不能把一次成功的公告发送变成 Webhook 异常。
+    await writeAuditLog(env, {
+      actorId: "telegram",
+      action: "telegram-submit-entry-failed",
+      targetId: String(chatId),
+      details: { error: String(error?.message || "Submission entry failed").slice(0, 240) },
+    }).catch(() => {});
+  }
+}
+
 // /start and /help are answered for every user, not only the configured review
 // chat. Forward the channel announcement so new users can find the icon
 // library; fall back to copying when the channel forbids forwarding, and to a
@@ -188,17 +225,24 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId) {
   };
   let forwardError = "";
   let copyError = "";
+  let delivered = false;
   try {
     await telegramApi(settings.token, "forwardMessage", payload);
-    return;
+    delivered = true;
   } catch (error) {
     forwardError = String(error?.message || error || "unknown error");
   }
-  try {
-    await telegramApi(settings.token, "copyMessage", payload);
+  if (!delivered) {
+    try {
+      await telegramApi(settings.token, "copyMessage", payload);
+      delivered = true;
+    } catch (error) {
+      copyError = String(error?.message || error || "unknown error");
+    }
+  }
+  if (delivered) {
+    await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
     return;
-  } catch (error) {
-    copyError = String(error?.message || error || "unknown error");
   }
   await writeAuditLog(env, {
     actorId: "telegram",
@@ -211,12 +255,18 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId) {
     },
   }).catch(() => {});
   const fallback = `欢迎使用 Emby 图标库，请查看公告：${ANNOUNCEMENT_URL}`;
-  // Only the configured reviewer chat gets the technical reason; ordinary
+  // Only the configured reviewer chat sees the technical details; ordinary
   // users still receive a clean link to the announcement.
-  const diagnostic = chatId === settings.chatId
-    ? `\n\n⚠️ 公告转发失败：${forwardError}；复制失败：${copyError}`
+  const cleanError = (value) => String(value || "")
+    .replace(/^(?:Bad Request|Error):\s*/i, "").trim().slice(0, 200);
+  const details = [];
+  if (forwardError) details.push(`转发：${cleanError(forwardError)}`);
+  if (copyError) details.push(`复制：${cleanError(copyError)}`);
+  const diagnostic = chatId === settings.chatId && details.length
+    ? `\n\n公告转发失败\n${details.join("\n")}`
     : "";
   await sendTelegramMessage(settings.token, chatId, fallback + diagnostic);
+  await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
 }
 
 // Same as sendTelegramMessage but for card bodies that already contain HTML.
@@ -589,18 +639,31 @@ export async function handleAdminTelegramSettings(request, env) {
     console.error("Telegram settings audit log failed", error);
   }
   let webhookConfigured = false;
-  let webhookWarning = "";
+  let menuConfigured = false;
+  const warnings = [];
   if (token && enabled && chatId) {
     try {
       await setTelegramWebhook(token, new URL(request.url).origin, webhookSecret);
       webhookConfigured = true;
     } catch (error) {
-      webhookWarning = "配置已保存，但 Telegram Webhook 设置失败，请检查站点是否可被公网访问。";
+      warnings.push("Telegram Webhook 设置失败，请检查站点是否可被公网访问。");
       await writeAuditLog(env, {
         actorId: "system",
         action: "telegram-webhook-failed",
         targetId: SETTINGS_KEY,
         details: { error: String(error.message || "Webhook setup failed").slice(0, 240) },
+      }).catch(() => {});
+    }
+    try {
+      await setTelegramSubmitMenuButton(token);
+      menuConfigured = true;
+    } catch (error) {
+      warnings.push("「提交图标」菜单设置失败，用户仍可通过 /start 或 /help 中的按钮进入 Mini App。");
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "telegram-submit-menu-failed",
+        targetId: SETTINGS_KEY,
+        details: { error: String(error.message || "Menu button setup failed").slice(0, 240) },
       }).catch(() => {});
     }
   } else if (token) {
@@ -609,8 +672,18 @@ export async function handleAdminTelegramSettings(request, env) {
     } catch {
       // Disabling notifications should still succeed when Telegram is unreachable.
     }
+    try {
+      await telegramApi(token, "setChatMenuButton", { menu_button: { type: "default" } });
+    } catch {
+      // The notification setting should not depend on resetting an optional menu button.
+    }
   }
-  return jsonResponse(request, { ...publicSettings({ enabled, chatId, token, webhookSecret }), webhookConfigured, warning: webhookWarning });
+  return jsonResponse(request, {
+    ...publicSettings({ enabled, chatId, token, webhookSecret }),
+    webhookConfigured,
+    menuConfigured,
+    warning: warnings.join(" "),
+  });
 }
 
 export async function notifyNewSubmission(env, submission, origin = "") {

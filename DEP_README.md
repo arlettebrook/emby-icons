@@ -145,7 +145,8 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 - **替换现有**：先显示将被替换的同名条目及现有 URL，必须再次确认。确认前若同名条目已经变化，会重新要求核对。
 - **下一条待审核**：任一审核结束后，卡片按钮会切换为「➡️ 下一条待审核」，点击即可直接拉取下一条待审核卡片；也可随时发送 `/queue` 查看完整待审核列表并跳转。
 - **取消和超时**：输入及替换确认 10 分钟内有效。点击卡片的取消按钮，或发送 /cancel，可返回当前真实审核状态；超时后的下一次交互会恢复卡片。输入提示直接折叠在审核卡片内，操作结束后随卡片在原位置刷新或恢复，不会残留额外的提示消息。
-- **/start 与 /help**：启用通知后，任何人（包括管理员）发送 `/start` 或 `/help` 都会收到频道公告 [MikuNaNChannel/8](https://t.me/MikuNaNChannel/8) 的转发；Bot 需要先被添加为 `@MikuNaNChannel` 的管理员，且频道不能开启「限制保存内容」，否则 Telegram 会拒绝转发。转发被禁止时会自动改为复制，复制也不可用时发送公告链接，并在管理员会话中显示具体失败原因。
+- **/start 与 /help**：启用通知后，任何人（包括管理员）发送 `/start` 或 `/help` 都会收到频道公告 [MikuNaNChannel/8](https://t.me/MikuNaNChannel/8) 的转发；Bot 需要先被添加为 `@MikuNaNChannel` 的管理员，且频道不能开启「限制保存内容」，否则 Telegram 会拒绝转发。转发被禁止时会自动改为复制，复制也不可用时发送公告链接，并在管理员会话中分行显示转发与复制的失败原因。
+- **提交图标入口**：公告转发、复制或链接兜底之后，Bot 会再发送一条「需要提交图标？」的轻提示，并附带「🖼 提交图标」URL 按钮，指向 `https://t.me/emby_icons_bot/submit?startapp=channel8`。Mini App 会读取 `start_param`（兼容 `tgWebAppStartParam`）并在页面显示频道公告来源提示。启用 Telegram 时，Bot 菜单按钮也会配置为「提交图标」，指向 `https://t.me/emby_icons_bot/submit?startapp=menu`。这要求 BotFather 中已将短名 `submit` 配置为 Mini App；菜单设置失败不会阻止通知配置保存。
 
 审核卡片使用 HTML `parse_mode`（名称、状态加粗，用户内容自动转义），并按消息长度自动截断，保证不超过 Telegram 的文本上限。每次按钮回调会先把 toast 文案细分（如「正在准备发布…」「正在改名并发布…」「请回复拒绝原因…」「已取消操作」「正在打开下一条待审核…」），再执行数据库操作，避免所有按钮都提示同一句话。发送 `/queue` 可随时查看待审核列表并直接跳转，队列为空时会给出提示。
 

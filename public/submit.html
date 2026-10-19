@@ -16,6 +16,8 @@
       .standalone-card { padding: 28px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
       .standalone-card h1 { margin: 0 0 10px; }
       .standalone-card p { color: var(--muted); line-height: 1.6; }
+      .mini-app-source { display: inline-flex; align-items: center; margin: 0 0 18px; padding: 6px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .mini-app-source[hidden] { display: none; }
       .standalone-form { display: grid; gap: 16px; margin-top: 24px; }
       .standalone-form textarea { min-height: 100px; resize: vertical; }
       .standalone-result { margin-top: 18px; padding: 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); line-height: 1.6; word-break: break-word; }
@@ -57,6 +59,7 @@
         <p class="eyebrow">EMBY ICONS / COMMUNITY SUBMISSION</p>
         <h1>提交一个图标</h1>
         <p>提交内容会进入审核队列。审核通过后才会出现在公开图标库中。请使用图标的 HTTPS 直链。</p>
+        <p class="mini-app-source" id="mini-app-source" hidden>来自频道公告 · 提交后会进入审核队列</p>
         <form class="standalone-form" id="submission-form">
           <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" placeholder="请输入图标名称" required autocomplete="off" /></label>
           <small class="name-example" id="name-example">名称需唯一；重名时会按你输入的名称给出建议。</small>
@@ -74,6 +77,6 @@
       // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submit.js?v=20261009-ui26"></script>
+    <script type="module" src="/submit.js?v=20261019-ui27"></script>
   </body>
 </html>
