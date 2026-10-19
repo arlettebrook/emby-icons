@@ -56,6 +56,7 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.enabled, true);
+  assert.equal(body.commandsConfigured, true);
   const setWebhook = mock.calls.find((call) => call.method === "setWebhook");
   assert.ok(setWebhook, "expected a setWebhook call");
   const menuButton = mock.method("setChatMenuButton").at(-1);
@@ -66,6 +67,19 @@ async function configureTelegram(env, chatId = CHAT_ID) {
     menuButton.payload.menu_button.web_app.url,
     "https://t.me/emby_icons_bot/submit?startapp=menu",
   );
+  const commandCalls = mock.method("setMyCommands");
+  assert.equal(commandCalls.length, 2, "expected default and reviewer command menus");
+  const defaultCommands = commandCalls.find((call) => call.payload.scope === undefined);
+  const reviewerCommands = commandCalls.find((call) => call.payload.scope?.type === "chat");
+  assert.deepEqual(
+    defaultCommands.payload.commands.map((item) => item.command),
+    ["start", "help", "submit"],
+  );
+  assert.deepEqual(
+    reviewerCommands.payload.commands.map((item) => item.command),
+    ["start", "help", "submit", "queue", "cancel", "reject", "skip"],
+  );
+  assert.equal(reviewerCommands.payload.scope.chat_id, Number(chatId));
   return String(setWebhook.payload.url).slice(String(setWebhook.payload.url).lastIndexOf("/") + 1);
 }
 
@@ -102,7 +116,7 @@ function lastCardSend() {
 function lastSubmissionEntry() {
   return mock.method("sendMessage").filter((call) =>
     call.payload.reply_markup?.inline_keyboard?.flat()
-      .some((button) => String(button.url || "").includes("t.me/emby_icons_bot/submit"))
+      .some((button) => String(button.url || button.web_app?.url || "").includes("t.me/emby_icons_bot/submit"))
   ).at(-1);
 }
 
@@ -842,6 +856,44 @@ test("/help also reaches the configured admin chat", async () => {
   }
 });
 
+test("/submit opens the submission Mini App from a private chat", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/submit", 28, { userId: "9006", chatId: "9006" });
+
+    const entry = mock.method("sendMessage").at(-1);
+    const button = entry.payload.reply_markup.inline_keyboard[0][0];
+    assert.match(entry.payload.text, /打开图标提交页面/);
+    assert.equal(button.text, "🖼 打开图标提交");
+    assert.equal(button.web_app.url, "https://t.me/emby_icons_bot/submit?startapp=command");
+    assert.equal(button.url, undefined);
+    assert.equal(mock.method("forwardMessage").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("/submit uses a URL button outside private chats", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/submit@MikuNaNBot", 29, { chatId: "-10099", chatType: "group" });
+
+    const entry = mock.method("sendMessage").at(-1);
+    const button = entry.payload.reply_markup.inline_keyboard[0][0];
+    assert.equal(button.url, "https://t.me/emby_icons_bot/submit?startapp=command");
+    assert.equal(button.web_app, undefined);
+    assert.equal(mock.method("forwardMessage").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("the announcement falls back to copyMessage when forwarding is blocked", async () => {
   mock = installTelegramFetchMock({
     fail: (method) => (method === "forwardMessage" ? "message can't be forwarded" : undefined),
@@ -935,6 +987,61 @@ test("a failed menu button does not block saving Telegram settings", async () =>
     assert.match(body.warning, /提交图标.*菜单设置失败/);
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-submit-menu-failed");
     assert.ok(audit, "expected the menu failure to be recorded");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a failed command menu does not block saving Telegram settings", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => (method === "setMyCommands" ? "Bad Request: command menu is invalid" : undefined),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: true, chatId: CHAT_ID, botToken: BOT_TOKEN }),
+      }),
+      env,
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.webhookConfigured, true);
+    assert.equal(body.menuConfigured, true);
+    assert.equal(body.commandsConfigured, false);
+    assert.match(body.warning, /命令菜单设置失败/);
+    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-commands-failed");
+    assert.ok(audit, "expected the command menu failure to be recorded");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("disabling Telegram clears registered command menus", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    await configureTelegram(env);
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: false }),
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(mock.method("deleteWebhook").length, 1);
+    assert.equal(mock.method("setChatMenuButton").at(-1).payload.menu_button.type, "default");
+    const commandDeletes = mock.method("deleteMyCommands");
+    assert.equal(commandDeletes.length, 2, "expected default and reviewer command menus to be removed");
+    assert.deepEqual(commandDeletes[0].payload, {});
+    assert.equal(commandDeletes[1].payload.scope.type, "chat");
+    assert.equal(commandDeletes[1].payload.scope.chat_id, Number(CHAT_ID));
   } finally {
     mock.restore();
   }

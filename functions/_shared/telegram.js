@@ -8,6 +8,18 @@ const ANNOUNCEMENT_URL = "https://t.me/MikuNaNChannel/8";
 const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
 const SUBMIT_ENTRY_URL = `${SUBMIT_MINI_APP_URL}?startapp=channel8`;
 const SUBMIT_MENU_URL = `${SUBMIT_MINI_APP_URL}?startapp=menu`;
+const SUBMIT_COMMAND_URL = `${SUBMIT_MINI_APP_URL}?startapp=command`;
+const PUBLIC_COMMANDS = [
+  { command: "start", description: "查看公告与提交入口" },
+  { command: "help", description: "查看帮助与提交入口" },
+  { command: "submit", description: "打开图标提交页面" },
+];
+const REVIEW_COMMANDS = [
+  { command: "queue", description: "查看待审核队列" },
+  { command: "cancel", description: "取消当前审核操作" },
+  { command: "reject", description: "拒绝当前提交" },
+  { command: "skip", description: "不填原因拒绝当前提交" },
+];
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TOKEN_LENGTH = 256;
 const MAX_CHAT_ID_LENGTH = 256;
@@ -162,6 +174,29 @@ async function setTelegramSubmitMenuButton(token) {
   });
 }
 
+function commandChatId(chatId) {
+  const value = String(chatId || "").trim();
+  const numeric = Number(value);
+  return /^-?\d+$/.test(value) && Number.isSafeInteger(numeric) ? numeric : value;
+}
+
+async function setTelegramCommands(token, chatId) {
+  await telegramApi(token, "setMyCommands", { commands: PUBLIC_COMMANDS });
+  if (!chatId) return;
+  await telegramApi(token, "setMyCommands", {
+    commands: [...PUBLIC_COMMANDS, ...REVIEW_COMMANDS],
+    scope: { type: "chat", chat_id: commandChatId(chatId) },
+  });
+}
+
+async function resetTelegramCommands(token, chatId) {
+  await telegramApi(token, "deleteMyCommands", {});
+  if (!chatId) return;
+  await telegramApi(token, "deleteMyCommands", {
+    scope: { type: "chat", chat_id: commandChatId(chatId) },
+  });
+}
+
 async function ensureWebhookForSettings(env, settings, origin) {
   if (settings.webhookSecret || !origin) return false;
   const webhookSecret = createSecret();
@@ -208,6 +243,28 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
       action: "telegram-submit-entry-failed",
       targetId: String(chatId),
       details: { error: String(error?.message || "Submission entry failed").slice(0, 240) },
+    }).catch(() => {});
+  }
+}
+
+async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId, chatType) {
+  const button = chatType === "private"
+    ? { text: "🖼 打开图标提交", web_app: { url: SUBMIT_COMMAND_URL } }
+    : { text: "🖼 打开图标提交", url: SUBMIT_COMMAND_URL };
+  try {
+    await telegramApi(settings.token, "sendMessage", {
+      chat_id: chatId,
+      text: "点击下方按钮打开图标提交页面，审核通过后会收录到公开图标库。",
+      disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      reply_markup: { inline_keyboard: [[button]] },
+    });
+  } catch (error) {
+    await writeAuditLog(env, {
+      actorId: "telegram",
+      action: "telegram-submit-command-failed",
+      targetId: String(chatId),
+      details: { error: String(error?.message || "Submit command failed").slice(0, 240) },
     }).catch(() => {});
   }
 }
@@ -640,6 +697,7 @@ export async function handleAdminTelegramSettings(request, env) {
   }
   let webhookConfigured = false;
   let menuConfigured = false;
+  let commandsConfigured = false;
   const warnings = [];
   if (token && enabled && chatId) {
     try {
@@ -666,6 +724,18 @@ export async function handleAdminTelegramSettings(request, env) {
         details: { error: String(error.message || "Menu button setup failed").slice(0, 240) },
       }).catch(() => {});
     }
+    try {
+      await setTelegramCommands(token, chatId);
+      commandsConfigured = true;
+    } catch (error) {
+      warnings.push("Bot 命令菜单设置失败，用户仍可发送 /start 或 /help。");
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "telegram-commands-failed",
+        targetId: SETTINGS_KEY,
+        details: { error: String(error.message || "Bot command menu setup failed").slice(0, 240) },
+      }).catch(() => {});
+    }
   } else if (token) {
     try {
       await telegramApi(token, "deleteWebhook", { drop_pending_updates: false });
@@ -677,11 +747,17 @@ export async function handleAdminTelegramSettings(request, env) {
     } catch {
       // The notification setting should not depend on resetting an optional menu button.
     }
+    try {
+      await resetTelegramCommands(token, chatId || current.chatId);
+    } catch {
+      // Disabling notifications should not depend on clearing optional bot commands.
+    }
   }
   return jsonResponse(request, {
     ...publicSettings({ enabled, chatId, token, webhookSecret }),
     webhookConfigured,
     menuConfigured,
+    commandsConfigured,
     warning: warnings.join(" "),
   });
 }
@@ -1226,9 +1302,13 @@ async function handleMessageUpdate(env, settings, message) {
   const userId = String(message.from?.id || "");
   if (!userId || message.from?.is_bot) return;
   const text = String(message.text || "").trim();
-  // Public /start and /help replies work in private chats and also reply to
+  // /submit works in any chat; /start and /help answer in private chats and in
   // the configured reviewer chat, independently of the review flow below.
   const announcementChat = message.chat?.type === "private" || chatId === settings.chatId;
+  if (/^\/submit(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+    await sendSubmitCommandEntry(env, settings, chatId, message.message_thread_id, message.chat?.type);
+    return;
+  }
   if (announcementChat && /^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
     await sendAnnouncement(env, settings, chatId, message.message_thread_id);
     return;
