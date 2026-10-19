@@ -2,6 +2,9 @@ import { hasAdminAccess } from "./admin.js";
 import { findIconNameConflict, normalizeIconName, readDocument, suggestIconNames, writeAuditLog } from "./icons.js";
 
 const SETTINGS_KEY = "settings/telegram.json";
+const ANNOUNCEMENT_CHANNEL = "@MikuNaNChannel";
+const ANNOUNCEMENT_MESSAGE_ID = 8;
+const ANNOUNCEMENT_URL = "https://t.me/MikuNaNChannel/8";
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TOKEN_LENGTH = 256;
 const MAX_CHAT_ID_LENGTH = 256;
@@ -170,6 +173,28 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
     disable_web_page_preview: true,
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+}
+
+// /start and /help are answered for every user, not only the configured review
+// chat. Forward the channel announcement so new users can find the icon
+// library; fall back to copying when the channel forbids forwarding, and to a
+// plain link when the bot cannot read the post at all.
+async function sendAnnouncement(token, chatId, messageThreadId) {
+  const payload = {
+    chat_id: chatId,
+    from_chat_id: ANNOUNCEMENT_CHANNEL,
+    message_id: ANNOUNCEMENT_MESSAGE_ID,
+    ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+  };
+  try {
+    await telegramApi(token, "forwardMessage", payload);
+    return;
+  } catch { /* Protected channel posts reject forwarding. */ }
+  try {
+    await telegramApi(token, "copyMessage", payload);
+    return;
+  } catch { /* Fall back to a link when the post cannot be read. */ }
+  await sendTelegramMessage(token, chatId, `欢迎使用 Emby 图标库，请查看公告：${ANNOUNCEMENT_URL}`);
 }
 
 // Same as sendTelegramMessage but for card bodies that already contain HTML.
@@ -1104,9 +1129,17 @@ async function cancelLegacyInput(env, settings, chatId) {
 async function handleMessageUpdate(env, settings, message) {
   const chatId = String(message?.chat?.id || "");
   const userId = String(message.from?.id || "");
-  if (chatId !== settings.chatId || !userId || message.from?.is_bot) return;
-  const key = reviewStateKey(chatId, userId);
+  if (!userId || message.from?.is_bot) return;
   const text = String(message.text || "").trim();
+  // Public /start and /help replies work in private chats and also reply to
+  // the configured reviewer chat, independently of the review flow below.
+  const announcementChat = message.chat?.type === "private" || chatId === settings.chatId;
+  if (announcementChat && /^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+    await sendAnnouncement(settings.token, chatId, message.message_thread_id);
+    return;
+  }
+  if (chatId !== settings.chatId) return;
+  const key = reviewStateKey(chatId, userId);
   // /queue is read-only and works whether or not a review input is pending.
   if (/^\/queue(?:@[^\s]+)?$/i.test(text)) {
     try {

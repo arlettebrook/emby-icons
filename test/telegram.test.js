@@ -782,6 +782,92 @@ test("replacement restores the card when the new icon document cannot be validat
 });
 
 
+test("/start forwards the channel announcement to any user", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/start", 21, { userId: "9001", chatId: "9001" });
+
+    const forward = mock.method("forwardMessage").at(-1);
+    assert.ok(forward, "expected the announcement to be forwarded");
+    assert.equal(forward.payload.chat_id, "9001");
+    assert.equal(forward.payload.from_chat_id, "@MikuNaNChannel");
+    assert.equal(forward.payload.message_id, 8);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("/help also reaches the configured admin chat", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/help@MikuNaNBot", 22);
+
+    const forward = mock.method("forwardMessage").at(-1);
+    assert.ok(forward, "expected the admin to receive the announcement too");
+    assert.equal(forward.payload.chat_id, CHAT_ID);
+    assert.equal(forward.payload.from_chat_id, "@MikuNaNChannel");
+    assert.equal(forward.payload.message_id, 8);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("the announcement falls back to copyMessage when forwarding is blocked", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => (method === "forwardMessage" ? "message can't be forwarded" : undefined),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/start", 23, { userId: "9002", chatId: "9002" });
+
+    const copy = mock.method("copyMessage").at(-1);
+    assert.ok(copy, "expected a copy fallback");
+    assert.equal(copy.payload.chat_id, "9002");
+    assert.equal(copy.payload.from_chat_id, "@MikuNaNChannel");
+    assert.equal(copy.payload.message_id, 8);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("ordinary messages from other chats stay ignored", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "hello", 24, { userId: "9003", chatId: "9003" });
+
+    assert.equal(mock.method("forwardMessage").length, 0);
+    assert.equal(mock.method("sendMessage").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("unrelated group commands do not forward the announcement", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/help", 25, { userId: "9004", chatId: "-10099", chatType: "group" });
+
+    assert.equal(mock.method("forwardMessage").length, 0);
+    assert.equal(mock.method("copyMessage").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("the /queue command lists pending submissions with jump buttons", async () => {
   mock = installTelegramFetchMock();
   try {
