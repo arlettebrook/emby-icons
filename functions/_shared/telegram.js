@@ -179,22 +179,44 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
 // chat. Forward the channel announcement so new users can find the icon
 // library; fall back to copying when the channel forbids forwarding, and to a
 // plain link when the bot cannot read the post at all.
-async function sendAnnouncement(token, chatId, messageThreadId) {
+async function sendAnnouncement(env, settings, chatId, messageThreadId) {
   const payload = {
     chat_id: chatId,
     from_chat_id: ANNOUNCEMENT_CHANNEL,
     message_id: ANNOUNCEMENT_MESSAGE_ID,
     ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
   };
+  let forwardError = "";
+  let copyError = "";
   try {
-    await telegramApi(token, "forwardMessage", payload);
+    await telegramApi(settings.token, "forwardMessage", payload);
     return;
-  } catch { /* Protected channel posts reject forwarding. */ }
+  } catch (error) {
+    forwardError = String(error?.message || error || "unknown error");
+  }
   try {
-    await telegramApi(token, "copyMessage", payload);
+    await telegramApi(settings.token, "copyMessage", payload);
     return;
-  } catch { /* Fall back to a link when the post cannot be read. */ }
-  await sendTelegramMessage(token, chatId, `欢迎使用 Emby 图标库，请查看公告：${ANNOUNCEMENT_URL}`);
+  } catch (error) {
+    copyError = String(error?.message || error || "unknown error");
+  }
+  await writeAuditLog(env, {
+    actorId: "telegram",
+    action: "telegram-announcement-failed",
+    targetId: ANNOUNCEMENT_CHANNEL,
+    details: {
+      chatId,
+      forwardError: forwardError.slice(0, 240),
+      copyError: copyError.slice(0, 240),
+    },
+  }).catch(() => {});
+  const fallback = `欢迎使用 Emby 图标库，请查看公告：${ANNOUNCEMENT_URL}`;
+  // Only the configured reviewer chat gets the technical reason; ordinary
+  // users still receive a clean link to the announcement.
+  const diagnostic = chatId === settings.chatId
+    ? `\n\n⚠️ 公告转发失败：${forwardError}；复制失败：${copyError}`
+    : "";
+  await sendTelegramMessage(settings.token, chatId, fallback + diagnostic);
 }
 
 // Same as sendTelegramMessage but for card bodies that already contain HTML.
@@ -1135,7 +1157,7 @@ async function handleMessageUpdate(env, settings, message) {
   // the configured reviewer chat, independently of the review flow below.
   const announcementChat = message.chat?.type === "private" || chatId === settings.chatId;
   if (announcementChat && /^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
-    await sendAnnouncement(settings.token, chatId, message.message_thread_id);
+    await sendAnnouncement(env, settings, chatId, message.message_thread_id);
     return;
   }
   if (chatId !== settings.chatId) return;

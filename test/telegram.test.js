@@ -838,6 +838,33 @@ test("the announcement falls back to copyMessage when forwarding is blocked", as
   }
 });
 
+test("the admin sees why the announcement could not be forwarded", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => {
+      if (method === "forwardMessage") return "Bad Request: message can't be forwarded";
+      if (method === "copyMessage") return "Bad Request: chat not found";
+      return undefined;
+    },
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/help", 26);
+
+    const send = mock.method("sendMessage").at(-1);
+    assert.match(send.payload.text, /MikuNaNChannel\/8/);
+    assert.match(send.payload.text, /公告转发失败/);
+    assert.match(send.payload.text, /message can't be forwarded/);
+    assert.match(send.payload.text, /chat not found/);
+    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-announcement-failed");
+    assert.ok(audit, "expected the failure to be recorded");
+    assert.match(audit.detailsJson, /chat not found/);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("ordinary messages from other chats stay ignored", async () => {
   mock = installTelegramFetchMock();
   try {
