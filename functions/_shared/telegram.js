@@ -94,15 +94,26 @@ function createSecret() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+// Only a positive numeric user ID can be a private chat with the bot. Group
+// and channel IDs are negative and are intentionally rejected.
+function isPrivateChatId(value) {
+  const text = String(value || "").trim();
+  if (!/^[1-9]\d*$/.test(text)) return false;
+  return Number.isSafeInteger(Number(text));
+}
+
 async function readSettings(env) {
   if (!env.EMBY_ICONS) throw new Error("EMBY_ICONS KV is not configured");
   const raw = await env.EMBY_ICONS.get(SETTINGS_KEY);
   if (!raw) return { enabled: false, chatId: "", token: "" };
   try {
     const parsed = JSON.parse(raw);
+    const storedChatId = typeof parsed.chatId === "string" ? parsed.chatId.trim() : "";
     return {
       enabled: parsed.enabled === true,
-      chatId: typeof parsed.chatId === "string" ? parsed.chatId : "",
+      // Legacy group/channel configurations are ignored instead of being
+      // allowed to keep receiving review cards.
+      chatId: isPrivateChatId(storedChatId) ? storedChatId : "",
       token: await decryptToken(parsed.token, env),
       webhookSecret: await decryptToken(parsed.webhookSecret, env),
     };
@@ -224,7 +235,7 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
 }
 
 // 公告和提交入口是两条消息：Telegram 不允许给已转发的频道消息追加按钮，
-// 因此用一条独立的轻提示承载 Mini App 入口，普通用户和群聊都能使用。
+// 因此用一条独立的轻提示承载 Mini App 入口。该入口只在私聊中使用。
 async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
   try {
     await telegramApi(token, "sendMessage", {
@@ -233,7 +244,7 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
       disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
-        inline_keyboard: [[{ text: "🖼 提交图标", url: SUBMIT_ENTRY_URL }]],
+        inline_keyboard: [[{ text: "🖼 提交图标", web_app: { url: SUBMIT_ENTRY_URL } }]],
       },
     });
   } catch (error) {
@@ -247,10 +258,8 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
   }
 }
 
-async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId, chatType) {
-  const button = chatType === "private"
-    ? { text: "🖼 打开图标提交", web_app: { url: SUBMIT_COMMAND_URL } }
-    : { text: "🖼 打开图标提交", url: SUBMIT_COMMAND_URL };
+async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
+  const button = { text: "🖼 打开图标提交", web_app: { url: SUBMIT_COMMAND_URL } };
   try {
     await telegramApi(settings.token, "sendMessage", {
       chat_id: chatId,
@@ -663,6 +672,9 @@ export async function handleAdminTelegramSettings(request, env) {
   const enabled = body.enabled === true;
   const chatId = body.chatId === undefined ? current.chatId : String(body.chatId).trim();
   if (chatId.length > MAX_CHAT_ID_LENGTH) return jsonResponse(request, { error: "chatId is too long" }, { status: 400 });
+  if (chatId && !isPrivateChatId(chatId)) {
+    return jsonResponse(request, { error: "Chat ID 必须是管理员与 Bot 私聊的数字 ID（正整数）" }, { status: 400 });
+  }
 
   let token = current.token;
   if (body.clearBotToken === true) token = "";
@@ -1183,8 +1195,9 @@ async function finishDecision(request, env, settings, key, state, message, row, 
 
 async function handleCallbackUpdate(request, env, settings, callback) {
   const chatId = String(callback.message?.chat?.id || "");
+  const chatType = callback.message?.chat?.type;
   const userId = String(callback.from?.id || "");
-  if (chatId !== settings.chatId || !userId || callback.from?.is_bot) {
+  if (chatType !== "private" || chatId !== settings.chatId || !userId || callback.from?.is_bot) {
     await answerCallback(settings.token, callback.id, "此聊天或操作人未授权").catch(() => {});
     return;
   }
@@ -1298,18 +1311,18 @@ async function cancelLegacyInput(env, settings, chatId) {
 }
 
 async function handleMessageUpdate(env, settings, message) {
+  // The bot intentionally supports private chats only. Group and channel
+  // updates are ignored completely: no command reply and no announcement.
+  if (message?.chat?.type !== "private") return;
   const chatId = String(message?.chat?.id || "");
   const userId = String(message.from?.id || "");
   if (!userId || message.from?.is_bot) return;
   const text = String(message.text || "").trim();
-  // /submit works in any chat; /start and /help answer in private chats and in
-  // the configured reviewer chat, independently of the review flow below.
-  const announcementChat = message.chat?.type === "private" || chatId === settings.chatId;
   if (/^\/submit(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
-    await sendSubmitCommandEntry(env, settings, chatId, message.message_thread_id, message.chat?.type);
+    await sendSubmitCommandEntry(env, settings, chatId, message.message_thread_id);
     return;
   }
-  if (announcementChat && /^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+  if (/^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
     await sendAnnouncement(env, settings, chatId, message.message_thread_id);
     return;
   }

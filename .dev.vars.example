@@ -2,5 +2,7 @@ ADMIN_TOKEN=replace-with-a-long-random-token
 ADMIN_SESSION_SECRET=replace-with-a-separate-session-signing-secret
 SUBMISSION_HASH_SECRET=replace-with-another-long-random-secret
 SUBMISSION_DAILY_LIMIT=20
-REQUIRE_TURNSTILE=false
+# 生产环境必须配置 TURNSTILE_SECRET_KEY，否则提交会 fail-closed。
 # TURNSTILE_SECRET_KEY=replace-with-turnstile-secret
+# 仅本地需要强制校验时再打开：
+# REQUIRE_TURNSTILE=true

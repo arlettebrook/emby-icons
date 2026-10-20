@@ -199,8 +199,15 @@ async function createWithToken(env, name, url, turnstileToken) {
     }),
     env,
   );
+  const status = response.status;
   const body = await response.json();
-  return { id: body.submission.id, token: body.accessToken };
+  return {
+    response,
+    status,
+    body,
+    id: body.submission?.id,
+    token: body.accessToken,
+  };
 }
 
 function ownerRequest(id, token, init = {}) {
@@ -209,6 +216,99 @@ function ownerRequest(id, token, init = {}) {
     headers: { "X-Submission-Token": token, ...(init.headers || {}) },
   });
 }
+test("daily submission quota cannot be restored by withdrawing or deleting", async () => {
+  const withdrawnEnv = createEnvironment();
+  withdrawnEnv.SUBMISSION_DAILY_LIMIT = "1";
+  const withdrawn = await createWithToken(withdrawnEnv, "First", "https://example.com/first.png");
+  await handleSubmissionItem(ownerRequest(withdrawn.id, withdrawn.token, { method: "POST" }), withdrawnEnv, withdrawn.id);
+  assert.equal(withdrawnEnv.DB.submissions.get(withdrawn.id).status, "withdrawn");
+  const afterWithdraw = await createWithToken(withdrawnEnv, "Second", "https://example.com/second.png");
+  assert.equal(afterWithdraw.status, 429);
+
+  const deletedEnv = createEnvironment();
+  deletedEnv.SUBMISSION_DAILY_LIMIT = "1";
+  const deleted = await createWithToken(deletedEnv, "First", "https://example.com/first.png");
+  await handleSubmissionItem(ownerRequest(deleted.id, deleted.token, { method: "DELETE" }), deletedEnv, deleted.id);
+  const afterDelete = await createWithToken(deletedEnv, "Second", "https://example.com/second.png");
+  assert.equal(afterDelete.status, 429);
+});
+
+test("resubmitting a rejected submission consumes the daily quota", async () => {
+  const env = createEnvironment();
+  env.SUBMISSION_DAILY_LIMIT = "1";
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+  await decide(env, id, { action: "reject", note: "重试" });
+  const response = await handleSubmissionItem(
+    ownerRequest(id, token, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Demo", url: "https://example.com/demo.png", note: "", resubmit: true }),
+    }),
+    env,
+    id,
+  );
+  assert.equal(response.status, 429);
+  assert.equal(env.DB.submissions.get(id).status, "rejected");
+});
+
+test("submission endpoints fail closed when the hash secret is missing", async () => {
+  const env = createEnvironment();
+  const { id, token } = await createWithToken(env, "Demo", "https://example.com/demo.png");
+
+  const missing = await createWithToken(env, "Other", "https://example.com/other.png");
+  delete env.SUBMISSION_HASH_SECRET;
+  const blocked = await createWithToken(env, "Other", "https://example.com/other.png");
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.body.error, /SUBMISSION_HASH_SECRET/);
+  const blockedRead = await handleSubmissionItem(ownerRequest(id, token), env, id);
+  assert.equal(blockedRead.status, 503);
+
+  env.SUBMISSION_HASH_SECRET = "test-secret";
+  env.ADMIN_TOKEN = "rotated-admin-token";
+  const stillValid = await handleSubmissionItem(ownerRequest(id, token), env, id);
+  assert.equal(stillValid.status, 200);
+  assert.equal(missing.status, 201);
+});
+
+test("an audit log failure does not fail submission creation", async () => {
+  const env = createEnvironment();
+  env.DB.auditFailures = 1;
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const response = await handleSubmissionCreate(
+      new Request("https://example.com/api/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Audited", url: "https://example.com/audited.png" }),
+      }),
+      env,
+    );
+    assert.equal(response.status, 201);
+    assert.equal(env.DB.submissions.size, 1);
+    assert.equal(env.DB.auditLogs.length, 0);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("production Turnstile configuration fails closed without a secret", async () => {
+  for (const [name, value] of [["ENVIRONMENT", "production"], ["CF_PAGES_BRANCH", "master"]]) {
+    const env = createEnvironment();
+    env[name] = value;
+    const response = await handleSubmissionCreate(
+      new Request("https://example.com/api/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Blocked", url: "https://example.com/blocked.png" }),
+      }),
+      env,
+    );
+    assert.equal(response.status, 403);
+    assert.match((await response.json()).error, /Turnstile is not configured/);
+    assert.equal(env.DB.submissions.size, 0);
+  }
+});
 
 test("a rejected submission can be edited and resubmitted into the queue", async () => {
   const env = createEnvironment();

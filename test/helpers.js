@@ -4,10 +4,12 @@ import { handleAdminSubmissionDecision, handleSubmissionCreate } from "../functi
 class FakeD1 {
   constructor() {
     this.submissions = new Map();
+    this.submissionAttempts = [];
     this.locks = new Map();
     this.auditLogs = [];
     this.versions = [];
     this.approvalUpdateFailures = 0;
+    this.auditFailures = 0;
   }
 
   prepare(sql) {
@@ -15,6 +17,12 @@ class FakeD1 {
     const db = this;
     const statement = (values) => ({
         first: async () => {
+          if (text.startsWith("SELECT COUNT(*)") && text.includes("submission_attempts")) {
+            const [ipHash, cutoff] = values;
+            return {
+              count: db.submissionAttempts.filter((row) => row.ip_hash === ipHash && row.created_at >= cutoff).length,
+            };
+          }
           if (text.startsWith("SELECT COUNT(*)")) {
             const [ipHash, cutoff] = values;
             return {
@@ -50,6 +58,15 @@ class FakeD1 {
           return { results: [] };
         },
         run: async () => {
+          if (text.startsWith("INSERT INTO submission_attempts")) {
+            const [ipHash, createdAt, cutoff, limit] = values;
+            const count = db.submissionAttempts.filter(
+              (row) => row.ip_hash === ipHash && row.created_at >= cutoff,
+            ).length;
+            if (count >= Number(limit)) return { meta: { changes: 0 } };
+            db.submissionAttempts.push({ ip_hash: ipHash, created_at: createdAt });
+            return { meta: { changes: 1 } };
+          }
           if (text.startsWith("INSERT INTO submissions")) {
             const [id, name, url, note, tokenHash, ipHash, createdAt] = values;
             db.submissions.set(id, {
@@ -170,6 +187,10 @@ class FakeD1 {
             return { meta: { changes: 0 } };
           }
           if (text.startsWith("INSERT INTO audit_logs")) {
+            if (db.auditFailures > 0) {
+              db.auditFailures -= 1;
+              throw new Error("D1 audit write failed");
+            }
             const [actorId, action, targetId, detailsJson, createdAt] = values;
             db.auditLogs.push({ actorId, action, targetId, detailsJson, createdAt });
             return { meta: { changes: 1 } };

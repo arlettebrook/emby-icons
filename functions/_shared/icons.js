@@ -178,12 +178,19 @@ export async function saveDocumentSnapshot(env, text, actorId, reason) {
 
 export async function writeAuditLog(env, { actorId, action, targetId, details }) {
   if (!env.DB) return;
-  await env.DB.prepare(
-    `INSERT INTO audit_logs (actor_id, action, target_id, details_json, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5)`,
-  )
-    .bind(actorId || "system", action, targetId || null, JSON.stringify(details || {}), Date.now())
-    .run();
+  // Audit logging is best-effort: losing one audit row must not roll back or
+  // fail the business operation that triggered it. Failures are surfaced in
+  // the Worker logs for operators instead.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO audit_logs (actor_id, action, target_id, details_json, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+    )
+      .bind(actorId || "system", action, targetId || null, JSON.stringify(details || {}), Date.now())
+      .run();
+  } catch (error) {
+    console.error("Audit log write failed", error);
+  }
 }
 
 export async function handleGet(request, env, cacheControl = "no-cache", { useGithubProxy = false } = {}) {

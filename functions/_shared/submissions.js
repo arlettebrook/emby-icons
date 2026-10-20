@@ -55,8 +55,18 @@ function getDailySubmissionLimit(env) {
   return Math.min(Math.max(Math.floor(configured), 1), 100);
 }
 
+function getSubmissionHashSecret(env) {
+  return String(env.SUBMISSION_HASH_SECRET || "").trim();
+}
+
+function requireSubmissionHashSecret(request, env) {
+  if (getSubmissionHashSecret(env)) return null;
+  return jsonResponse(request, env, { error: "SUBMISSION_HASH_SECRET is not configured" }, { status: 503 });
+}
+
 async function hashValue(value, env) {
-  const secret = String(env.SUBMISSION_HASH_SECRET || env.ADMIN_TOKEN || "local-development-secret");
+  const secret = getSubmissionHashSecret(env);
+  if (!secret) throw new Error("SUBMISSION_HASH_SECRET is not configured");
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -116,10 +126,19 @@ async function readJson(request, env) {
   }
 }
 
+function isProductionEnvironment(env) {
+  const environment = String(env.ENVIRONMENT || "").trim().toLowerCase();
+  const branch = String(env.CF_PAGES_BRANCH || "").trim().toLowerCase();
+  return ["production", "prod"].includes(environment) || ["master", "main"].includes(branch);
+}
+
 async function verifyTurnstile(request, env, body) {
   const secret = String(env.TURNSTILE_SECRET_KEY || "").trim();
   if (!secret) {
-    if (String(env.REQUIRE_TURNSTILE).toLowerCase() === "true") return "Turnstile is not configured";
+    // Production must never silently accept submissions without Turnstile.
+    if (isProductionEnvironment(env) || String(env.REQUIRE_TURNSTILE).toLowerCase() === "true") {
+      return "Turnstile is not configured";
+    }
     return null;
   }
   const token = String(body.turnstileToken || request.headers.get("X-Turnstile-Token") || "").trim();
@@ -128,14 +147,18 @@ async function verifyTurnstile(request, env, body) {
   const form = new URLSearchParams({ secret, response: token });
   const ip = getIp(request);
   if (ip !== "unknown") form.set("remoteip", ip);
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: form,
-  });
-  if (!response.ok) return "Turnstile verification failed";
-  const result = await response.json();
-  return result.success ? null : "Turnstile verification failed";
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form,
+    });
+    if (!response.ok) return "Turnstile verification failed";
+    const result = await response.json();
+    return result.success ? null : "Turnstile verification failed";
+  } catch {
+    return "Turnstile verification failed";
+  }
 }
 
 async function readSubmission(env, id) {
@@ -226,9 +249,37 @@ async function finalizeApproval(env, id, reviewerId, name, fields = {}) {
   throw new Error("Submission state changed while publishing");
 }
 
+async function consumeSubmissionAttempt(request, env) {
+  const ipHash = await hashValue(getIp(request), env);
+  const now = Date.now();
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const limit = getDailySubmissionLimit(env);
+  // Count and insert in one statement so concurrent requests cannot all pass
+  // the check. Attempt rows are never deleted with a submission, so withdraw
+  // and delete cannot restore a user's daily quota.
+  const attempt = await env.DB.prepare(
+    `INSERT INTO submission_attempts (ip_hash, created_at)
+     SELECT ?1, ?2
+      WHERE (SELECT COUNT(*) FROM submission_attempts WHERE ip_hash = ?1 AND created_at >= ?3) < ?4`,
+  )
+    .bind(ipHash, now, cutoff, limit)
+    .run();
+  if (!attempt.meta?.changes) {
+    return {
+      response: jsonResponse(request, env, { error: "今日提交次数已达上限，请稍后再试。", limit }, {
+        status: 429,
+        headers: { "Retry-After": "86400" },
+      }),
+    };
+  }
+  return { ipHash };
+}
+
 export async function handleSubmissionCreate(request, env, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
+  const missingSecret = requireSubmissionHashSecret(request, env);
+  if (missingSecret) return missingSecret;
 
   let body;
   try {
@@ -242,16 +293,9 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   const validation = validateSubmission(body);
   if (validation.error) return jsonResponse(request, env, { error: validation.error }, { status: 400 });
 
-  const ipHash = await hashValue(getIp(request), env);
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const rate = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM submissions WHERE ip_hash = ?1 AND created_at >= ?2 AND status != 'withdrawn'",
-  )
-    .bind(ipHash, cutoff)
-    .first();
-  if (Number(rate?.count || 0) >= getDailySubmissionLimit(env)) {
-    return jsonResponse(request, env, { error: "今日提交次数已达上限，请稍后再试。", limit: getDailySubmissionLimit(env) }, { status: 429, headers: { "Retry-After": "86400" } });
-  }
+  const attempt = await consumeSubmissionAttempt(request, env);
+  if (attempt.response) return attempt.response;
+  const { ipHash } = attempt;
 
   const id = crypto.randomUUID();
   const accessToken = createToken();
@@ -289,6 +333,8 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
 export async function handleSubmissionItem(request, env, id, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
+  const missingSecret = requireSubmissionHashSecret(request, env);
+  if (missingSecret) return missingSecret;
   const ownership = await requireSubmissionOwner(request, env, id);
   if (ownership.response) return ownership.response;
   const { row } = ownership;
@@ -350,6 +396,9 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
   // 撤回、删除只改自己这一条的状态，沿用访问令牌，不额外要求验证。
   const turnstileError = await verifyTurnstile(request, env, body);
   if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
+
+  const attempt = await consumeSubmissionAttempt(request, env);
+  if (attempt.response) return attempt.response;
 
   const reset = await env.DB
     .prepare(

@@ -142,12 +142,12 @@ function message(secret, env, text, messageId = 11, options = {}) {
 }
 
 function callback(secret, env, data, callbackId = "cb-1", options = {}) {
-  const { userId = USER_ID, chatId = CHAT_ID, messageId = 10, text = "original", photo } = options;
+  const { userId = USER_ID, chatId = CHAT_ID, chatType = "private", messageId = 10, text = "original", photo } = options;
   return handleTelegramWebhook(
     webhookRequest(secret, {
       callback_query: {
         id: callbackId, from: { id: userId }, data,
-        message: { chat: { id: chatId }, message_id: messageId, ...(photo ? { photo } : { text }) },
+        message: { chat: { id: chatId, type: chatType }, message_id: messageId, ...(photo ? { photo } : { text }) },
       },
     }), env, secret,
   );
@@ -542,19 +542,18 @@ telegramTest("replacement asks again when the existing icon changes before confi
   assert.equal(readKv(env).icons[0].url, "https://example.com/new.png");
 }, { icons: [{ name: "Existing", url: "https://example.com/old.png" }] });
 
-telegramTest("group chatter, another reviewer and stale replies cannot become rejection reasons", async ({ env, secret }) => {
+telegramTest("review callbacks and messages from groups are ignored", async ({ env, secret }) => {
   const chatId = "-100123";
   const id = await createSubmission(env, "GroupReview", "https://example.com/group.png");
-  await callback(secret, env, `reject:${id}`, "group", { chatId });
-  const state = pendingState(env, USER_ID, chatId);
   const options = { chatId, chatType: "supergroup" };
-  await message(secret, env, "今天讨论的事情", 20, options);
-  await message(secret, env, "其他人的消息", 21, { ...options, userId: "1002", replyTo: state.messageId });
-  await message(secret, env, "旧回复", 22, { ...options, replyTo: state.messageId - 1 });
+  await callback(secret, env, `reject:${id}`, "group", options);
+  await message(secret, env, "确实无法访问", 20, options);
+  await message(secret, env, "/reject", 21, options);
   assert.equal(env.DB.submissions.get(id).status, "pending");
-  await message(secret, env, "确实无法访问", 23, { ...options, replyTo: state.messageId });
-  assert.equal(env.DB.submissions.get(id).reviewer_note, "确实无法访问");
-}, { chatId: "-100123" });
+  assert.equal(pendingState(env, USER_ID, chatId), null);
+  assert.equal(mock.method("sendMessage").length, 0);
+  assert.equal(mock.method("forwardMessage").length, 0);
+});
 
 telegramTest("one reviewer cannot press another reviewer's confirmation", async ({ env, secret }) => {
   const id = await createSubmission(env, "Scoped", "https://example.com/scoped.png");
@@ -830,7 +829,7 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.match(entry.payload.text, /审核通过后会收录到公开图标库/);
     assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "🖼 提交图标");
     assert.equal(
-      entry.payload.reply_markup.inline_keyboard[0][0].url,
+      entry.payload.reply_markup.inline_keyboard[0][0].web_app.url,
       "https://t.me/emby_icons_bot/submit?startapp=channel8",
     );
   } finally {
@@ -876,24 +875,22 @@ test("/submit opens the submission Mini App from a private chat", async () => {
   }
 });
 
-test("/submit uses a URL button outside private chats", async () => {
+test("group commands are ignored completely", async () => {
   mock = installTelegramFetchMock();
   try {
     const env = createEnvironment({ icons: [] });
     const secret = await configureTelegram(env);
 
     await message(secret, env, "/submit@MikuNaNBot", 29, { chatId: "-10099", chatType: "group" });
+    await message(secret, env, "/start@MikuNaNBot", 30, { chatId: "-10099", chatType: "group" });
 
-    const entry = mock.method("sendMessage").at(-1);
-    const button = entry.payload.reply_markup.inline_keyboard[0][0];
-    assert.equal(button.url, "https://t.me/emby_icons_bot/submit?startapp=command");
-    assert.equal(button.web_app, undefined);
+    assert.equal(mock.method("sendMessage").length, 0);
     assert.equal(mock.method("forwardMessage").length, 0);
+    assert.equal(mock.method("copyMessage").length, 0);
   } finally {
     mock.restore();
   }
 });
-
 test("the announcement falls back to copyMessage when forwarding is blocked", async () => {
   mock = installTelegramFetchMock({
     fail: (method) => (method === "forwardMessage" ? "message can't be forwarded" : undefined),
@@ -939,6 +936,32 @@ test("the admin sees why the announcement could not be forwarded", async () => {
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-announcement-failed");
     assert.ok(audit, "expected the failure to be recorded");
     assert.match(audit.detailsJson, /chat not found/);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("ordinary users do not see announcement diagnostics", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => {
+      if (method === "forwardMessage") return "Bad Request: message can't be forwarded";
+      if (method === "copyMessage") return "Bad Request: chat not found";
+      return undefined;
+    },
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/start", 27, { userId: "9003", chatId: "9003" });
+
+    const send = mock.method("sendMessage").find((call) =>
+      !call.payload.reply_markup && /MikuNaNChannel\/8/.test(call.payload.text)
+    );
+    assert.ok(send, "expected the announcement link fallback");
+    assert.match(send.payload.text, /MikuNaNChannel\/8/);
+    assert.doesNotMatch(send.payload.text, /公告转发失败|chat not found|message can't be forwarded/);
+    assert.ok(lastSubmissionEntry(), "expected a submission entry after the link fallback");
   } finally {
     mock.restore();
   }
