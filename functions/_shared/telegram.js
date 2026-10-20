@@ -9,10 +9,12 @@ const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
 const SUBMIT_ENTRY_URL = `${SUBMIT_MINI_APP_URL}?startapp=channel8`;
 const SUBMIT_MENU_URL = `${SUBMIT_MINI_APP_URL}?startapp=menu`;
 const SUBMIT_COMMAND_URL = `${SUBMIT_MINI_APP_URL}?startapp=command`;
+const MY_SUBMISSIONS_URL = `${SUBMIT_MINI_APP_URL}?startapp=my`;
 const PUBLIC_COMMANDS = [
   { command: "start", description: "查看公告与提交入口" },
   { command: "help", description: "查看帮助与提交入口" },
   { command: "submit", description: "打开图标提交页面" },
+  { command: "my", description: "查看我的提交" },
 ];
 const REVIEW_COMMANDS = [
   { command: "queue", description: "查看待审核队列" },
@@ -89,6 +91,98 @@ async function decryptToken(record, env) {
   return new TextDecoder().decode(decrypted);
 }
 
+function timingSafeEqual(left, right) {
+  const a = String(left || "");
+  const b = String(right || "");
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+async function hmacSha256(keyBytes, dataBytes) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, dataBytes);
+  return new Uint8Array(signature);
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// Validate Telegram.WebApp.initData with the bot token stored server-side.
+// The browser never supplies a token or a trusted user object; only the
+// HMAC-authenticated payload from Telegram is accepted.
+export async function verifyTelegramInitData(env, initData, { maxAgeSeconds = 24 * 60 * 60 } = {}) {
+  if (typeof initData !== "string") return null;
+  const raw = initData.trim();
+  if (!raw || raw.length > 8192) return null;
+
+  let params;
+  try {
+    params = new URLSearchParams(raw);
+  } catch {
+    return null;
+  }
+
+  const hash = String(params.get("hash") || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+
+  const authDate = Number(params.get("auth_date"));
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(authDate) || authDate <= 0) return null;
+  // Allow a small clock skew, but never accept a payload from the future or
+  // one that has outlived its freshness window.
+  if (authDate > nowSeconds + 60) return null;
+  if (nowSeconds - authDate > maxAgeSeconds) return null;
+
+  let settings;
+  try {
+    settings = await readSettings(env);
+  } catch {
+    return null;
+  }
+  if (!settings.token) return null;
+
+  const dataCheckString = [...params.entries()]
+    .filter(([key]) => key !== "hash")
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+
+  const encoder = new TextEncoder();
+  try {
+    const secretKey = await hmacSha256(encoder.encode("WebAppData"), encoder.encode(settings.token));
+    const expected = bytesToHex(await hmacSha256(secretKey, encoder.encode(dataCheckString)));
+    if (!timingSafeEqual(expected, hash)) return null;
+  } catch {
+    return null;
+  }
+
+  let user;
+  try {
+    user = JSON.parse(String(params.get("user") || ""));
+  } catch {
+    return null;
+  }
+  const id = Number(user?.id);
+  if (!Number.isSafeInteger(id) || id <= 0 || user?.is_bot === true) return null;
+
+  return {
+    id,
+    username: typeof user.username === "string" ? user.username.trim().slice(0, 64) : "",
+    firstName: typeof user.first_name === "string" ? user.first_name.trim().slice(0, 128) : "",
+    lastName: typeof user.last_name === "string" ? user.last_name.trim().slice(0, 128) : "",
+  };
+}
 function createSecret() {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -244,7 +338,10 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
       disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
-        inline_keyboard: [[{ text: "🖼 提交图标", web_app: { url: SUBMIT_ENTRY_URL } }]],
+        inline_keyboard: [
+          [{ text: "🖼 提交图标", url: SUBMIT_ENTRY_URL }],
+          [{ text: "📋 我的提交", url: MY_SUBMISSIONS_URL }],
+        ],
       },
     });
   } catch (error) {
@@ -259,14 +356,19 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
 }
 
 async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
-  const button = { text: "🖼 打开图标提交", web_app: { url: SUBMIT_COMMAND_URL } };
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🖼 打开图标提交", url: SUBMIT_COMMAND_URL }],
+      [{ text: "📋 查看我的提交", url: MY_SUBMISSIONS_URL }],
+    ],
+  };
   try {
     await telegramApi(settings.token, "sendMessage", {
       chat_id: chatId,
-      text: "点击下方按钮打开图标提交页面，审核通过后会收录到公开图标库。",
+      text: "点击下方按钮打开图标提交页面，审核通过后会收录到公开图标库。审核结果也会通过 Telegram 私聊通知你。",
       disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-      reply_markup: { inline_keyboard: [[button]] },
+      reply_markup: keyboard,
     });
   } catch (error) {
     await writeAuditLog(env, {
@@ -274,6 +376,28 @@ async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
       action: "telegram-submit-command-failed",
       targetId: String(chatId),
       details: { error: String(error?.message || "Submit command failed").slice(0, 240) },
+    }).catch(() => {});
+  }
+}
+
+async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
+  const keyboard = {
+    inline_keyboard: [[{ text: "📋 查看我的提交", url: MY_SUBMISSIONS_URL }]],
+  };
+  try {
+    await telegramApi(settings.token, "sendMessage", {
+      chat_id: chatId,
+      text: "点击下方按钮查看你通过 Telegram 提交的图标，以及每条记录的审核状态。",
+      disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      reply_markup: keyboard,
+    });
+  } catch (error) {
+    await writeAuditLog(env, {
+      actorId: "telegram",
+      action: "telegram-my-command-failed",
+      targetId: String(chatId),
+      details: { error: String(error?.message || "My submissions command failed").slice(0, 240) },
     }).catch(() => {});
   }
 }
@@ -835,6 +959,98 @@ export async function queueSubmissionNotification(env, submission, waitUntil, or
   else await task;
 }
 
+// Notify the submitter after a review decision. The result_notified_at marker is
+// claimed atomically before sending, so retries or concurrent review handlers
+// cannot deliver the same result twice. A failed Telegram call releases the
+// marker for a later retry without changing the review outcome.
+export async function notifySubmissionResult(env, id) {
+  if (!env?.DB || !id) return false;
+
+  // This function is called after a review has already been committed. Keep
+  // every failure contained here so Telegram outages, missing settings, or a
+  // D1 read error can only mean "not notified", never "review failed".
+  try {
+    let settings;
+    try {
+      settings = await readSettings(env);
+    } catch {
+      return false;
+    }
+    if (!settings.enabled || !settings.token) return false;
+
+    const row = await env.DB.prepare(
+      `SELECT id, name, status, reviewer_note, telegram_user_id, result_notified_at
+         FROM submissions WHERE id = ?1`,
+    )
+      .bind(id)
+      .first();
+    if (!row?.telegram_user_id || !["approved", "rejected"].includes(row.status)) return false;
+
+    const claimedAt = Date.now();
+    const claimed = await env.DB.prepare(
+      `UPDATE submissions SET result_notified_at = ?1
+        WHERE id = ?2 AND telegram_user_id IS NOT NULL AND result_notified_at IS NULL`,
+    )
+      .bind(claimedAt, id)
+      .run();
+    if (!claimed.meta?.changes) return false;
+
+    const name = htmlTruncate(row.name, 140);
+    const approved = row.status === "approved";
+    const text = approved
+      ? [
+          "✅ <b>你的图标已通过审核</b>",
+          "",
+          `名称：<b>${name}</b>`,
+          "状态：已发布到公开图标库",
+        ].join("\n")
+      : [
+          "❌ <b>你的图标未通过审核</b>",
+          "",
+          `名称：<b>${name}</b>`,
+          `原因：${htmlTruncate(row.reviewer_note || "未填写原因", 500)}`,
+        ].join("\n");
+    const keyboard = approved
+      ? null
+      : {
+          inline_keyboard: [[{
+            text: "🔁 重新提交",
+            url: `${SUBMIT_MINI_APP_URL}?startapp=resubmit_${encodeURIComponent(id)}`,
+          }]],
+        };
+
+    try {
+      await sendHtmlMessage(settings.token, String(row.telegram_user_id), text, keyboard);
+    } catch (error) {
+      // Release only our own claim. If another worker already changed it, the
+      // conditional UPDATE leaves the newer state untouched.
+      await env.DB.prepare(
+        "UPDATE submissions SET result_notified_at = NULL WHERE id = ?1 AND result_notified_at = ?2",
+      )
+        .bind(id, claimedAt)
+        .run()
+        .catch(() => {});
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "submission-result-notification-failed",
+        targetId: id,
+        details: { error: String(error?.message || "Submission result notification failed").slice(0, 240) },
+      });
+      return false;
+    }
+
+    await writeAuditLog(env, {
+      actorId: "system",
+      action: "submission-result-notified",
+      targetId: id,
+      details: { status: row.status },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // A single input flow per reviewer avoids consuming a rejection reason as a name.
 function reviewStateKey(chatId, userId) {
   return `settings/telegram/review/${encodeURIComponent(chatId)}/${encodeURIComponent(userId)}`;
@@ -1320,6 +1536,10 @@ async function handleMessageUpdate(env, settings, message) {
   const text = String(message.text || "").trim();
   if (/^\/submit(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
     await sendSubmitCommandEntry(env, settings, chatId, message.message_thread_id);
+    return;
+  }
+  if (/^\/my(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+    await sendMySubmissionsEntry(env, settings, chatId, message.message_thread_id);
     return;
   }
   if (/^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {

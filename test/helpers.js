@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 import { handleAdminSubmissionDecision, handleSubmissionCreate } from "../functions/_shared/submissions.js";
 
 
@@ -10,6 +12,8 @@ class FakeD1 {
     this.versions = [];
     this.approvalUpdateFailures = 0;
     this.auditFailures = 0;
+    this.resultNotificationClaimFailures = 0;
+    this.resultNotificationReleaseFailures = 0;
   }
 
   prepare(sql) {
@@ -31,6 +35,9 @@ class FakeD1 {
               ).length,
             };
           }
+          if (text.startsWith("SELECT id, name, status, reviewer_note, telegram_user_id, result_notified_at")) {
+            return db.submissions.get(values[0]) || null;
+          }
           if (text.startsWith("SELECT id, name, url, note, status")) {
             return db.submissions.get(values[0]) || null;
           }
@@ -45,12 +52,17 @@ class FakeD1 {
         },
         all: async () => {
           if (text.includes("FROM submissions")) {
+            const telegramOwned = text.includes("WHERE telegram_user_id = ?1");
             const scoped = text.includes("WHERE status = ?1");
             const pendingOnly = text.includes("WHERE status = 'pending'");
+            const telegramUserId = telegramOwned ? values[0] : null;
             const status = scoped ? values[0] : pendingOnly ? "pending" : null;
-            const limit = scoped ? values[1] : values[0];
+            const limit = telegramOwned ? values[1] : scoped ? values[1] : values[0];
             const rows = [...db.submissions.values()]
-              .filter((row) => (status ? row.status === status : true))
+              .filter((row) => (
+                (telegramOwned ? String(row.telegram_user_id) === String(telegramUserId) : true) &&
+                (status ? row.status === status : true)
+              ))
               .sort((a, b) => b.created_at - a.created_at)
               .slice(0, limit);
             return { results: rows };
@@ -68,7 +80,7 @@ class FakeD1 {
             return { meta: { changes: 1 } };
           }
           if (text.startsWith("INSERT INTO submissions")) {
-            const [id, name, url, note, tokenHash, ipHash, createdAt] = values;
+            const [id, name, url, note, tokenHash, ipHash, createdAt, telegramUserId, telegramUsername] = values;
             db.submissions.set(id, {
               id,
               name,
@@ -81,6 +93,9 @@ class FakeD1 {
               reviewer_id: null,
               reviewer_note: null,
               reviewed_at: null,
+              telegram_user_id: telegramUserId ?? null,
+              telegram_username: telegramUsername ?? null,
+              result_notified_at: null,
             });
             return { meta: { changes: 1 } };
           }
@@ -108,6 +123,7 @@ class FakeD1 {
               row.reviewer_id = null;
               row.reviewer_note = null;
               row.reviewed_at = null;
+              row.result_notified_at = null;
               return { meta: { changes: 1 } };
             }
             return { meta: { changes: 0 } };
@@ -165,6 +181,32 @@ class FakeD1 {
               if (note !== null && note !== undefined) row.note = note;
               row.reviewer_id = reviewerId;
               row.reviewed_at = reviewedAt;
+              return { meta: { changes: 1 } };
+            }
+            return { meta: { changes: 0 } };
+          }
+          if (text.startsWith("UPDATE submissions SET result_notified_at = ?1")) {
+            if (db.resultNotificationClaimFailures > 0) {
+              db.resultNotificationClaimFailures -= 1;
+              throw new Error("D1 result notification claim failed");
+            }
+            const [claimedAt, id] = values;
+            const row = db.submissions.get(id);
+            if (row?.telegram_user_id && row.result_notified_at == null) {
+              row.result_notified_at = claimedAt;
+              return { meta: { changes: 1 } };
+            }
+            return { meta: { changes: 0 } };
+          }
+          if (text.startsWith("UPDATE submissions SET result_notified_at = NULL WHERE id = ?1")) {
+            if (db.resultNotificationReleaseFailures > 0) {
+              db.resultNotificationReleaseFailures -= 1;
+              throw new Error("D1 result notification release failed");
+            }
+            const [id, claimedAt] = values;
+            const row = db.submissions.get(id);
+            if (row && row.result_notified_at === claimedAt) {
+              row.result_notified_at = null;
               return { meta: { changes: 1 } };
             }
             return { meta: { changes: 0 } };
@@ -239,17 +281,36 @@ function adminHeaders(extra = {}) {
   return { Authorization: "Bearer admin-secret", "Content-Type": "application/json", ...extra };
 }
 
-async function createSubmission(env, name, url) {
+async function createSubmission(env, name, url, { initData = "" } = {}) {
   const response = await handleSubmissionCreate(
     new Request("https://example.com/api/submissions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(initData ? { "X-Telegram-Init-Data": initData } : {}),
+      },
       body: JSON.stringify({ name, url }),
     }),
     env,
   );
   const body = await response.json();
+  if (!response.ok) throw new Error(body.error || "Submission creation failed (" + response.status + ")");
   return body.submission.id;
+}
+
+function makeTelegramInitData(token, user = { id: 1001, username: "test_user" }, authDate = Math.floor(Date.now() / 1000)) {
+  const params = new URLSearchParams();
+  params.set("auth_date", String(authDate));
+  params.set("query_id", "AAH-test-query");
+  params.set("user", JSON.stringify(user));
+  const dataCheckString = [...params.entries()]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, value]) => key + "=" + value)
+    .join(String.fromCharCode(10));
+  const secretKey = createHmac("sha256", "WebAppData").update(token).digest();
+  const hash = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+  params.set("hash", hash);
+  return params.toString();
 }
 
 async function decide(env, id, payload) {
@@ -264,4 +325,4 @@ async function decide(env, id, payload) {
   );
 }
 
-export { FakeD1, createEnvironment, readKv, adminHeaders, createSubmission, decide };
+export { FakeD1, createEnvironment, readKv, adminHeaders, createSubmission, decide, makeTelegramInitData };

@@ -1,3 +1,33 @@
+function readMiniAppStartParam() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return String(
+      window.Telegram?.WebApp?.initDataUnsafe?.start_param ||
+      params.get("tgWebAppStartParam") ||
+      params.get("startapp") ||
+      "",
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+function miniAppRedirectTarget(startParam) {
+  if (startParam === "my") return "/submission.html?startapp=my";
+  if (startParam.startsWith("resubmit_")) {
+    const id = startParam.slice("resubmit_".length);
+    if (/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      return "/submission.html?startapp=resubmit_" + encodeURIComponent(id);
+    }
+  }
+  return "";
+}
+
+const miniAppStartParam = readMiniAppStartParam();
+const redirectTarget = miniAppRedirectTarget(miniAppStartParam);
+if (redirectTarget) {
+  window.location.replace(redirectTarget);
+} else {
 const form = document.querySelector("#submission-form");
 const button = document.querySelector("#submit-button");
 const result = document.querySelector("#result");
@@ -7,6 +37,7 @@ const nameExample = document.querySelector("#name-example");
 const miniAppSourceHint = document.querySelector("#mini-app-source");
 let turnstileToken = "";
 let turnstileWidgetId = null;
+let telegramInitData = String(window.Telegram?.WebApp?.initData || "").trim();
 
 function showResult(message, error = false) {
   result.hidden = false;
@@ -14,7 +45,7 @@ function showResult(message, error = false) {
   result.classList.toggle("error", error);
 }
 
-function showSubmissionSuccess(submission, accessToken) {
+function showSubmissionSuccess(submission, accessToken, telegramBound = false) {
   result.hidden = false;
   result.classList.remove("error");
   result.replaceChildren();
@@ -23,7 +54,9 @@ function showSubmissionSuccess(submission, accessToken) {
   message.textContent = `提交成功，编号：${submission.id}`;
   const explanation = document.createElement("span");
   explanation.className = "credential-note";
-  explanation.textContent = "访问凭证用于查看状态、修改或撤回这条提交。编号只能定位记录，不能代替访问凭证。";
+  explanation.textContent = telegramBound
+    ? "审核结果会通过 Telegram 私聊通知你。访问凭证仍可用于在其他浏览器中查看、修改或撤回这条提交。"
+    : "访问凭证用于查看状态、修改或撤回这条提交。编号只能定位记录，不能代替访问凭证。";
   const actions = document.createElement("div");
   actions.className = "credential-actions";
 
@@ -271,7 +304,11 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/submissions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(turnstileToken ? { "X-Turnstile-Token": turnstileToken } : {}) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(telegramInitData ? { "X-Telegram-Init-Data": telegramInitData } : {}),
+        ...(turnstileToken ? { "X-Turnstile-Token": turnstileToken } : {}),
+      },
       body: JSON.stringify({
         name: document.querySelector("#name").value,
         url: document.querySelector("#url").value,
@@ -304,7 +341,7 @@ form.addEventListener("submit", async (event) => {
     localStorage.setItem("emby-submissions", JSON.stringify(savedSubmissions.slice(0, 30)));
     form.reset();
     clearNameHint();
-    showSubmissionSuccess(body.submission, body.accessToken);
+    showSubmissionSuccess(body.submission, body.accessToken, body.telegramBound === true);
   } catch (error) {
     showResult(error.message, true);
   } finally {
@@ -344,3 +381,4 @@ function initTelegramWebApp() {
 
 loadTurnstile();
 initTelegramWebApp();
+}

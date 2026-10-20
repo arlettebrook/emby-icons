@@ -10,7 +10,12 @@ import {
   writeAuditLog,
 } from "./icons.js";
 import { hasAdminAccess } from "./admin.js";
-import { clearSubmissionConflictState, queueSubmissionNotification } from "./telegram.js";
+import {
+  clearSubmissionConflictState,
+  notifySubmissionResult,
+  queueSubmissionNotification,
+  verifyTelegramInitData,
+} from "./telegram.js";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 120;
@@ -21,7 +26,7 @@ const DEFAULT_SUBMISSIONS_PER_IP_PER_DAY = 20;
 function corsHeaders(request, env) {
   const headers = {
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match, X-Submission-Token, X-Turnstile-Token",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match, X-Submission-Token, X-Telegram-Init-Data, X-Turnstile-Token",
     "Access-Control-Expose-Headers": "ETag",
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
@@ -164,7 +169,8 @@ async function verifyTurnstile(request, env, body) {
 async function readSubmission(env, id) {
   return env.DB.prepare(
     `SELECT id, name, url, note, status, submitter_token_hash, ip_hash, created_at,
-            reviewer_id, reviewer_note, reviewed_at
+            reviewer_id, reviewer_note, reviewed_at,
+            telegram_user_id, telegram_username, result_notified_at
        FROM submissions WHERE id = ?1`,
   )
     .bind(id)
@@ -173,20 +179,66 @@ async function readSubmission(env, id) {
 
 function publicSubmission(row) {
   if (!row) return null;
-  const { submitter_token_hash: _token, ip_hash: _ip, ...safe } = row;
+  const {
+    submitter_token_hash: _token,
+    ip_hash: _ip,
+    telegram_user_id: _telegramUserId,
+    telegram_username: _telegramUsername,
+    result_notified_at: _resultNotifiedAt,
+    ...safe
+  } = row;
   return safe;
+}
+
+function telegramInitData(request) {
+  return String(request.headers.get("X-Telegram-Init-Data") || "").trim();
+}
+
+// Reads the optional Telegram identity supplied by the Mini App. A malformed
+// or forged payload is reported as "provided but invalid" so the caller can
+// reject it instead of silently downgrading to an anonymous request.
+async function readTelegramIdentity(request, env) {
+  const raw = telegramInitData(request);
+  if (!raw) return { provided: false, identity: null };
+  return { provided: true, identity: await verifyTelegramInitData(env, raw) };
 }
 
 async function requireSubmissionOwner(request, env, id) {
   const token = String(request.headers.get("X-Submission-Token") || "").trim();
-  if (!token) return { response: jsonResponse(request, env, { error: "Submission token is required" }, { status: 401 }) };
+  const telegram = await readTelegramIdentity(request, env);
+  // Once a client supplies initData, a bad signature or expired payload must
+  // fail closed even when an access token is also present. The token may still
+  // be used from an ordinary browser, but it must not turn forged identity data
+  // into a silent anonymous fallback.
+  if (telegram.provided && !telegram.identity) {
+    return {
+      response: jsonResponse(request, env, {
+        error: "Telegram 身份校验失败，请重新打开 Mini App。",
+        code: "TELEGRAM_AUTH_INVALID",
+      }, { status: 401 }),
+    };
+  }
+  if (!token && !telegram.identity) {
+    return {
+      response: jsonResponse(request, env, { error: "Submission token or Telegram identity is required" }, { status: 401 }),
+    };
+  }
   const row = await readSubmission(env, id);
   if (!row) return { response: jsonResponse(request, env, { error: "Submission not found" }, { status: 404 }) };
-  const tokenHash = await hashValue(token, env);
-  if (tokenHash !== row.submitter_token_hash) {
+
+  if (token) {
+    const tokenHash = await hashValue(token, env);
+    if (tokenHash === row.submitter_token_hash) return { row };
+  }
+
+  if (telegram.identity && row.telegram_user_id && String(row.telegram_user_id) === String(telegram.identity.id)) {
+    return { row };
+  }
+
+  if (token) {
     return { response: jsonResponse(request, env, { error: "Invalid submission token" }, { status: 403 }) };
   }
-  return { row };
+  return { response: jsonResponse(request, env, { error: "这条提交不属于当前 Telegram 账号。" }, { status: 403 }) };
 }
 
 async function requireAdmin(request, env) {
@@ -287,6 +339,20 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   } catch (error) {
     return jsonResponse(request, env, { error: error.message }, { status: 400 });
   }
+
+  // Telegram identity is optional so ordinary browsers can still submit
+  // anonymously. If the Mini App did send initData, however, a forged or
+  // expired payload must fail closed instead of silently becoming anonymous.
+  const telegram = await readTelegramIdentity(request, env);
+  if (telegram.provided && !telegram.identity) {
+    return jsonResponse(request, env, {
+      error: "Telegram 身份校验失败，请从机器人重新打开 Mini App 后再提交。",
+      code: "TELEGRAM_AUTH_INVALID",
+    }, { status: 401 });
+  }
+  const identity = telegram.identity;
+  const telegramUsername = identity?.username ? String(identity.username).slice(0, 64) : null;
+
   const turnstileError = await verifyTurnstile(request, env, body);
   if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
 
@@ -303,17 +369,32 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO submissions
-      (id, name, url, note, status, submitter_token_hash, ip_hash, created_at)
-     VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7)`,
+      (id, name, url, note, status, submitter_token_hash, ip_hash, created_at,
+       telegram_user_id, telegram_username)
+     VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9)`,
   )
-    .bind(id, validation.value.name, validation.value.url, validation.value.note, tokenHash, ipHash, now)
+    .bind(
+      id,
+      validation.value.name,
+      validation.value.url,
+      validation.value.note,
+      tokenHash,
+      ipHash,
+      now,
+      identity?.id || null,
+      telegramUsername,
+    )
     .run();
 
   await writeAuditLog(env, {
     actorId: `submission:${id}`,
     action: "submission-created",
     targetId: id,
-    details: { name: validation.value.name, url: validation.value.url },
+    details: {
+      name: validation.value.name,
+      url: validation.value.url,
+      telegramBound: Boolean(identity),
+    },
   });
   await queueSubmissionNotification(env, {
     id,
@@ -325,7 +406,12 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   return jsonResponse(
     request,
     env,
-    { ok: true, submission: { id, status: "pending", name: validation.value.name, url: validation.value.url }, accessToken },
+    {
+      ok: true,
+      submission: { id, status: "pending", name: validation.value.name, url: validation.value.url },
+      accessToken,
+      telegramBound: Boolean(identity),
+    },
     { status: 201 },
   );
 }
@@ -402,7 +488,7 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
 
   const reset = await env.DB
     .prepare(
-      "UPDATE submissions SET name = ?1, url = ?2, note = ?3, status = 'pending', reviewer_id = NULL, reviewer_note = NULL, reviewed_at = NULL WHERE id = ?4 AND status IN ('rejected', 'withdrawn')",
+      "UPDATE submissions SET name = ?1, url = ?2, note = ?3, status = 'pending', reviewer_id = NULL, reviewer_note = NULL, reviewed_at = NULL, result_notified_at = NULL WHERE id = ?4 AND status IN ('rejected', 'withdrawn')",
     )
     .bind(validation.value.name, validation.value.url, validation.value.note, id)
     .run();
@@ -432,6 +518,38 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
       reviewed_at: null,
     },
   });
+}
+
+// Return only the current Telegram user's own records. The bot-signed initData
+// is the authorization boundary; no submission access token is needed here.
+export async function handleMySubmissionList(request, env) {
+  const missingDb = requireDatabase(request, env);
+  if (missingDb) return missingDb;
+  if (request.method !== "GET") {
+    return jsonResponse(request, env, { error: "Method not allowed" }, { status: 405 });
+  }
+
+  const telegram = await readTelegramIdentity(request, env);
+  if (!telegram.provided) {
+    return jsonResponse(request, env, { error: "Telegram identity is required" }, { status: 401 });
+  }
+  if (!telegram.identity) {
+    return jsonResponse(request, env, {
+      error: "Telegram 身份校验失败，请从机器人重新打开 Mini App。",
+      code: "TELEGRAM_AUTH_INVALID",
+    }, { status: 401 });
+  }
+
+  const rows = await env.DB.prepare(
+    `SELECT id, name, url, note, status, reviewer_note, created_at, reviewed_at
+       FROM submissions
+      WHERE telegram_user_id = ?1
+      ORDER BY created_at DESC
+      LIMIT ?2`,
+  )
+    .bind(telegram.identity.id, 100)
+    .all();
+  return jsonResponse(request, env, { submissions: rows.results || [] });
 }
 
 export async function handleAdminSubmissionList(request, env) {
@@ -488,7 +606,20 @@ export async function handleAdminSubmissionList(request, env) {
   return jsonResponse(request, env, { submissions });
 }
 
-export async function handleAdminSubmissionDecision(request, env, id) {
+async function notifySubmissionResultBestEffort(env, id, waitUntil) {
+  const task = (async () => {
+    try {
+      await notifySubmissionResult(env, id);
+    } catch {
+      // A notification is a side effect. It must never turn a completed review
+      // into a failed request or trigger a retry that republishes the icon.
+    }
+  })();
+  if (typeof waitUntil === "function") waitUntil(task);
+  else await task;
+}
+
+export async function handleAdminSubmissionDecision(request, env, id, waitUntil) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
   const authError = await requireAdmin(request, env);
@@ -520,6 +651,7 @@ export async function handleAdminSubmissionDecision(request, env, id) {
       .bind(reviewerId, note, Date.now(), id)
       .run();
     await writeAuditLog(env, { actorId: reviewerId, action: "submission-rejected", targetId: id, details: { note } });
+    await notifySubmissionResultBestEffort(env, id, waitUntil);
     return jsonResponse(request, env, { ok: true, status: "rejected" });
   }
 
@@ -527,6 +659,7 @@ export async function handleAdminSubmissionDecision(request, env, id) {
     return jsonResponse(request, env, { error: "Only pending submissions can be reviewed" }, { status: 409 });
   }
   if (row.status === "approved") {
+    await notifySubmissionResultBestEffort(env, id, waitUntil);
     return jsonResponse(request, env, { ok: true, status: "approved", alreadyPublished: true });
   }
 
@@ -604,6 +737,7 @@ export async function handleAdminSubmissionDecision(request, env, id) {
         targetId: id,
         details: { name: conflict.name, url: conflict.url, alreadyPublished: true },
       });
+      await notifySubmissionResultBestEffort(env, id, waitUntil);
       return jsonResponse(request, env, { ok: true, status: "approved", alreadyPublished: true, count: document.icons.length });
     }
 
@@ -646,6 +780,7 @@ export async function handleAdminSubmissionDecision(request, env, id) {
         ...(conflict ? { replaced: { name: conflict.name, url: conflict.url } } : {}),
       },
     });
+    await notifySubmissionResultBestEffort(env, id, waitUntil);
     return jsonResponse(
       request,
       env,
@@ -667,6 +802,7 @@ export async function handleAdminSubmissionDecision(request, env, id) {
         targetId: id,
         details: { name: effectiveName, url: effectiveUrl, recovered: true },
       });
+      await notifySubmissionResultBestEffort(env, id, waitUntil);
       return jsonResponse(request, env, { ok: true, status: "approved", count: publishedCount, recovered: true });
     } catch (recoveryError) {
       return jsonResponse(

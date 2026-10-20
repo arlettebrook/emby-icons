@@ -5,8 +5,22 @@ import {
   handleAdminTelegramSettings,
   handleTelegramWebhook,
   notifyNewSubmission,
+  notifySubmissionResult,
+  verifyTelegramInitData,
 } from "../functions/_shared/telegram.js";
-import { adminHeaders, createEnvironment, createSubmission, readKv } from "./helpers.js";
+import {
+  handleMySubmissionList,
+  handleSubmissionCreate,
+  handleSubmissionItem,
+} from "../functions/_shared/submissions.js";
+import {
+  adminHeaders,
+  createEnvironment,
+  createSubmission,
+  decide,
+  makeTelegramInitData,
+  readKv,
+} from "./helpers.js";
 
 const CHAT_ID = "7328767184";
 const USER_ID = "1001";
@@ -73,11 +87,11 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   const reviewerCommands = commandCalls.find((call) => call.payload.scope?.type === "chat");
   assert.deepEqual(
     defaultCommands.payload.commands.map((item) => item.command),
-    ["start", "help", "submit"],
+    ["start", "help", "submit", "my"],
   );
   assert.deepEqual(
     reviewerCommands.payload.commands.map((item) => item.command),
-    ["start", "help", "submit", "queue", "cancel", "reject", "skip"],
+    ["start", "help", "submit", "my", "queue", "cancel", "reject", "skip"],
   );
   assert.equal(reviewerCommands.payload.scope.chat_id, Number(chatId));
   return String(setWebhook.payload.url).slice(String(setWebhook.payload.url).lastIndexOf("/") + 1);
@@ -829,7 +843,7 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.match(entry.payload.text, /审核通过后会收录到公开图标库/);
     assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "🖼 提交图标");
     assert.equal(
-      entry.payload.reply_markup.inline_keyboard[0][0].web_app.url,
+      entry.payload.reply_markup.inline_keyboard[0][0].url,
       "https://t.me/emby_icons_bot/submit?startapp=channel8",
     );
   } finally {
@@ -867,8 +881,8 @@ test("/submit opens the submission Mini App from a private chat", async () => {
     const button = entry.payload.reply_markup.inline_keyboard[0][0];
     assert.match(entry.payload.text, /打开图标提交页面/);
     assert.equal(button.text, "🖼 打开图标提交");
-    assert.equal(button.web_app.url, "https://t.me/emby_icons_bot/submit?startapp=command");
-    assert.equal(button.url, undefined);
+    assert.equal(button.url, "https://t.me/emby_icons_bot/submit?startapp=command");
+    assert.equal(button.web_app, undefined);
     assert.equal(mock.method("forwardMessage").length, 0);
   } finally {
     mock.restore();
@@ -1257,4 +1271,200 @@ telegramTest("callback toasts match the action that was triggered", async ({ env
 
   await callback(secret, env, buttonData("cancel"), "cancel");
   assert.match(mock.method("answerCallbackQuery").at(-1).payload.text, /已取消操作/);
+});
+
+telegramTest("Telegram initData verification accepts fresh signed data and rejects tampering or stale data", async ({ env }) => {
+  const user = { id: 9101, username: "signed_user", first_name: "Signed" };
+  const valid = makeTelegramInitData(BOT_TOKEN, user);
+  const identity = await verifyTelegramInitData(env, valid);
+  assert.equal(identity.id, user.id);
+  assert.equal(identity.username, user.username);
+
+  const tampered = valid.replace("signed_user", "changed_user");
+  assert.equal(await verifyTelegramInitData(env, tampered), null);
+  assert.equal(
+    await verifyTelegramInitData(env, makeTelegramInitData(BOT_TOKEN, user, Math.floor(Date.now() / 1000) - 172800)),
+    null,
+  );
+  assert.equal(
+    await verifyTelegramInitData(env, makeTelegramInitData(BOT_TOKEN, user, Math.floor(Date.now() / 1000) + 120)),
+    null,
+  );
+  assert.equal(
+    await verifyTelegramInitData(env, makeTelegramInitData("999999:WRONG-TOKEN", user)),
+    null,
+  );
+});
+
+telegramTest("Mini App submissions bind Telegram identity and reject invalid initData without downgrading", async ({ env }) => {
+  const initData = makeTelegramInitData(BOT_TOKEN, { id: 9102, username: "bound_user", first_name: "Bound" });
+  const response = await handleSubmissionCreate(
+    new Request("https://example.com/api/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": initData },
+      body: JSON.stringify({ name: "BoundIcon", url: "https://example.com/bound.png" }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 201);
+  const body = await response.json();
+  assert.equal(body.telegramBound, true);
+  const row = env.DB.submissions.get(body.submission.id);
+  assert.equal(row.telegram_user_id, 9102);
+  assert.equal(row.telegram_username, "bound_user");
+
+  const before = env.DB.submissions.size;
+  const invalid = makeTelegramInitData("999999:WRONG-TOKEN", { id: 9103, username: "forged" });
+  const rejected = await handleSubmissionCreate(
+    new Request("https://example.com/api/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": invalid },
+      body: JSON.stringify({ name: "ForgedIcon", url: "https://example.com/forged.png" }),
+    }),
+    env,
+  );
+  assert.equal(rejected.status, 401);
+  assert.equal((await rejected.json()).code, "TELEGRAM_AUTH_INVALID");
+  assert.equal(env.DB.submissions.size, before);
+
+  // A valid access token must not silently override forged or expired initData.
+  const tokenPlusInvalidIdentity = await handleSubmissionItem(
+    new Request("https://example.com/api/submissions/" + body.submission.id, {
+      headers: {
+        "X-Submission-Token": body.accessToken,
+        "X-Telegram-Init-Data": invalid,
+      },
+    }),
+    env,
+    body.submission.id,
+  );
+  assert.equal(tokenPlusInvalidIdentity.status, 401);
+  assert.equal((await tokenPlusInvalidIdentity.json()).code, "TELEGRAM_AUTH_INVALID");
+});
+
+telegramTest("Telegram identity grants record ownership only to the same user", async ({ env }) => {
+  const owner = makeTelegramInitData(BOT_TOKEN, { id: 9104, username: "owner_user" });
+  const other = makeTelegramInitData(BOT_TOKEN, { id: 9105, username: "other_user" });
+  const id = await createSubmission(env, "OwnedIcon", "https://example.com/owned.png", { initData: owner });
+
+  const allowed = await handleSubmissionItem(
+    new Request("https://example.com/api/submissions/" + id, {
+      headers: { "X-Telegram-Init-Data": owner },
+    }),
+    env,
+    id,
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal((await allowed.json()).submission.name, "OwnedIcon");
+
+  const denied = await handleSubmissionItem(
+    new Request("https://example.com/api/submissions/" + id, {
+      headers: { "X-Telegram-Init-Data": other },
+    }),
+    env,
+    id,
+  );
+  assert.equal(denied.status, 403);
+});
+
+telegramTest("/my and the Telegram submission list expose only the current users records", async ({ env, secret }) => {
+  const alice = makeTelegramInitData(BOT_TOKEN, { id: 9106, username: "alice" });
+  const bob = makeTelegramInitData(BOT_TOKEN, { id: 9107, username: "bob" });
+  const aliceId = await createSubmission(env, "AliceIcon", "https://example.com/alice.png", { initData: alice });
+  await createSubmission(env, "BobIcon", "https://example.com/bob.png", { initData: bob });
+
+  await message(secret, env, "/my", 31, { userId: "9106", chatId: "9106" });
+  const entry = mock.method("sendMessage").at(-1);
+  assert.equal(entry.payload.chat_id, "9106");
+  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].url, "https://t.me/emby_icons_bot/submit?startapp=my");
+
+  const response = await handleMySubmissionList(
+    new Request("https://example.com/api/my/submissions", {
+      headers: { "X-Telegram-Init-Data": alice },
+    }),
+    env,
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.submissions.map((item) => item.id), [aliceId]);
+  assert.equal(body.submissions[0].name, "AliceIcon");
+});
+
+telegramTest("approving a bound submission sends a private result notification", async ({ env }) => {
+  const initData = makeTelegramInitData(BOT_TOKEN, { id: 9108, username: "approved_user" });
+  const id = await createSubmission(env, "ApprovedIcon", "https://example.com/approved.png", { initData });
+  const response = await decide(env, id, { action: "approve" });
+  assert.equal(response.status, 200);
+
+  const sent = mock.method("sendMessage").find((call) => String(call.payload.chat_id) === "9108");
+  assert.ok(sent, "expected a private result notification");
+  assert.match(sent.payload.text, /已通过审核/);
+  assert.match(sent.payload.text, /ApprovedIcon/);
+  assert.equal(sent.payload.reply_markup, undefined);
+  assert.equal(typeof env.DB.submissions.get(id).result_notified_at, "number");
+});
+
+telegramTest("rejection notification includes the reason and a resubmit Mini App button", async ({ env }) => {
+  const initData = makeTelegramInitData(BOT_TOKEN, { id: 9109, username: "rejected_user" });
+  const id = await createSubmission(env, "RejectedIcon", "https://example.com/rejected.png", { initData });
+  const response = await decide(env, id, { action: "reject", note: "图片无法访问" });
+  assert.equal(response.status, 200);
+
+  const sent = mock.method("sendMessage").find((call) => String(call.payload.chat_id) === "9109");
+  assert.ok(sent, "expected a private rejection notification");
+  assert.match(sent.payload.text, /未通过审核/);
+  assert.match(sent.payload.text, /图片无法访问/);
+  const button = sent.payload.reply_markup.inline_keyboard[0][0];
+  assert.equal(button.text, "🔁 重新提交");
+  assert.equal(
+    button.url,
+    "https://t.me/emby_icons_bot/submit?startapp=resubmit_" + encodeURIComponent(id),
+  );
+});
+
+test("a failed result notification does not roll back the review and can be retried once", async () => {
+  let failUserNotification = true;
+  mock = installTelegramFetchMock({
+    fail: (method, payload) => (
+      method === "sendMessage" && String(payload.chat_id) === "9110" && failUserNotification
+        ? "Forbidden: bot was blocked by the user"
+        : undefined
+    ),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const initData = makeTelegramInitData(BOT_TOKEN, { id: 9110, username: "retry_user" });
+    const id = await createSubmission(env, "RetryNotification", "https://example.com/retry.png", { initData });
+
+    const response = await decide(env, id, { action: "reject", note: "格式不正确" });
+    assert.equal(response.status, 200);
+    assert.equal(env.DB.submissions.get(id).status, "rejected");
+    assert.equal(env.DB.submissions.get(id).result_notified_at, null);
+    const failure = env.DB.auditLogs.find((entry) => entry.action === "submission-result-notification-failed");
+    assert.ok(failure, "expected the notification failure to be audited");
+
+    failUserNotification = false;
+    assert.equal(await notifySubmissionResult(env, id), true);
+    assert.equal(typeof env.DB.submissions.get(id).result_notified_at, "number");
+    assert.equal(await notifySubmissionResult(env, id), false, "the claimed result must not be sent twice");
+    const delivered = mock.method("sendMessage").filter((call) => String(call.payload.chat_id) === "9110" && /未通过审核/.test(call.payload.text));
+    assert.equal(delivered.length, 2, "one failed attempt and one successful retry");
+  } finally {
+    mock.restore();
+  }
+});
+
+telegramTest("an audit failure during result notification cannot change the review outcome", async ({ env }) => {
+  const initData = makeTelegramInitData(BOT_TOKEN, { id: 9111, username: "audit_user" });
+  const id = await createSubmission(env, "AuditSafe", "https://example.com/audit.png", { initData });
+  env.DB.auditFailures = 10;
+
+  const response = await decide(env, id, { action: "reject", note: "测试审计失败" });
+  assert.equal(response.status, 200);
+  assert.equal(env.DB.submissions.get(id).status, "rejected");
+  assert.equal(env.DB.submissions.get(id).reviewer_note, "测试审计失败");
+  const sent = mock.method("sendMessage").find((call) => String(call.payload.chat_id) === "9111");
+  assert.ok(sent, "the notification should still be attempted");
+  assert.match(sent.payload.text, /测试审计失败/);
 });

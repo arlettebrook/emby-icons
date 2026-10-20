@@ -115,9 +115,10 @@ test("runtime migration applies only migrations missing from the ledger", async 
   await ensureDatabaseSchema({ DB: db });
 
   assert.deepEqual([...db.applied.keys()], MIGRATIONS.map((migration) => migration.id));
-  assert.equal(db.batches.length, 1);
+  assert.equal(db.batches.length, MIGRATIONS.length - 1);
   assert.ok(!db.executed.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS submissions")));
   assert.ok(db.executed.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS submission_attempts")));
+  assert.ok(db.executed.some((sql) => sql.includes("ADD COLUMN telegram_user_id INTEGER")));
 });
 
 test("concurrent schema checks share a single migration run", async () => {

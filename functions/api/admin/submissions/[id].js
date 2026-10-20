@@ -3,8 +3,8 @@ import {
   handleSubmissionOptions,
 } from "../../../_shared/submissions.js";
 
-export function onRequestPost({ request, env, params }) {
-  return handleAdminSubmissionDecision(request, env, params.id);
+export function onRequestPost({ request, env, params, waitUntil }) {
+  return handleAdminSubmissionDecision(request, env, params.id, waitUntil);
 }
 
 export function onRequestOptions({ request, env }) {

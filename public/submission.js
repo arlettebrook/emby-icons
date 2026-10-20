@@ -23,6 +23,8 @@ const detailTurnstile = document.querySelector("#detail-turnstile");
 const turnstileContainer = document.querySelector("#turnstile-container");
 const turnstileError = document.querySelector("#turnstile-error");
 const queryId = new URLSearchParams(window.location.search).get("id");
+let telegramInitData = "";
+let miniAppStartParam = "";
 let currentId = "";
 let currentToken = "";
 let currentStatus = "";
@@ -82,6 +84,13 @@ function readSavedSubmissions() {
 // 把当前列表的引用整体写回本地。以前是每加载一条记录就同步写一次 localStorage，
 // 30 条记录会在主线程上写 30 次，首屏明显被拖慢；现在每次加载最多写一次，
 // 内容没变化时直接跳过。
+function submissionHeaders(token, extra = {}) {
+  const headers = { ...extra };
+  if (token) headers["X-Submission-Token"] = token;
+  if (telegramInitData) headers["X-Telegram-Init-Data"] = telegramInitData;
+  return headers;
+}
+
 function persistReferences(items) {
   const wanted = new Map();
   for (const item of items.slice(0, 30)) {
@@ -824,7 +833,7 @@ async function loadOne(reference) {
   let status = 0;
   try {
     const response = await fetch("/api/submissions/" + encodeURIComponent(reference.id), {
-      headers: { "X-Submission-Token": reference.token },
+      headers: submissionHeaders(reference.token),
       cache: "no-store",
     });
     status = response.status;
@@ -874,26 +883,47 @@ function resetDetailPanel(options) {
   hideDetailPanel();
 }
 
+async function loadTelegramSubmissions() {
+  if (!telegramInitData) return { items: [], error: "" };
+  try {
+    const response = await fetch("/api/my/submissions", {
+      headers: submissionHeaders(""),
+      cache: "no-store",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { items: [], error: body.error || "读取 Telegram 提交记录失败（" + response.status + "）" };
+    }
+    const items = (Array.isArray(body.submissions) ? body.submissions : [])
+      .filter((submission) => submission?.id)
+      .map((submission) => ({ submission, token: "" }));
+    return { items, error: "" };
+  } catch (error) {
+    return { items: [], error: error.message || "读取 Telegram 提交记录失败" };
+  }
+}
+
 async function loadAll() {
   const references = readSavedSubmissions();
-  knownReferences = references;
-  if (!references.length) {
-    currentItems = [];
-    renderList([]);
-    resetDetailPanel();
-    countWrap.hidden = true;
-    clearAllWrap.hidden = true;
-    empty.hidden = false;
-    return;
-  }
-  const loaded = await Promise.all(references.map(loadOne));
+  const [loaded, telegram] = await Promise.all([
+    Promise.all(references.map(loadOne)),
+    loadTelegramSubmissions(),
+  ]);
   // 服务端已经不存在的记录直接从本地清掉，避免列表里留下点不开的幽灵条目。
   loaded.filter((item) => item.missing).forEach((item) => removeSavedSubmission(item.id));
-  // 服务端返回顺序不稳定，按提交时间倒序排列，保证每次打开顺序一致（新的在上面）。
+
+  // Local records keep their access token. Telegram-only records rely on the
+  // signed Mini App identity, so they deliberately carry an empty token.
+  const merged = new Map();
+  for (const item of loaded) {
+    if (item.submission) merged.set(item.submission.id, item);
+  }
+  for (const item of telegram.items) {
+    if (!merged.has(item.submission.id)) merged.set(item.submission.id, item);
+  }
   const submittedAt = (item) => Date.parse(item.submission.created_at || "") || 0;
-  const valid = loaded
-    .filter((item) => item.submission)
-    .sort((a, b) => submittedAt(b) - submittedAt(a));
+  const valid = [...merged.values()].sort((a, b) => submittedAt(b) - submittedAt(a));
+  knownReferences = valid.map((item) => ({ id: item.submission.id, token: item.token }));
   currentItems = valid;
   renderList(valid);
   // 本地引用一次性写回，避免每条记录都同步写一次 localStorage。
@@ -907,7 +937,10 @@ async function loadAll() {
   if (selected) selectSubmission(selected.submission.id, selected.token, selected.submission, { scroll: false, animate: false });
   else resetDetailPanel();
   const failed = loaded.find((item) => item.error);
-  if (failed && !valid.length) showResult("暂时无法读取保存的提交记录，请重新提交或检查浏览器存储。", true);
+  if (!valid.length) {
+    if (telegram.error) showResult("暂时无法读取 Telegram 提交记录，请重新打开 Mini App 后重试。", true);
+    else if (failed) showResult("暂时无法读取保存的提交记录，请重新提交或检查浏览器存储。", true);
+  }
 }
 
 // 局部刷新：保存、撤回、删除后不再整表重新拉取，直接改本地缓存再重排列表，
@@ -991,11 +1024,10 @@ async function saveSubmission(event) {
       try {
         const response = await fetch("/api/submissions/" + encodeURIComponent(currentId), {
           method: "PATCH",
-          headers: {
+          headers: submissionHeaders(currentToken, {
             "Content-Type": "application/json",
-            "X-Submission-Token": currentToken,
             ...(verifying && turnstileToken ? { "X-Turnstile-Token": turnstileToken } : {}),
-          },
+          }),
           body: JSON.stringify(payload),
         });
         const body = await response.json().catch(() => ({}));
@@ -1037,7 +1069,7 @@ async function withdrawSubmission(id, token, base, button) {
     try {
       const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "POST",
-        headers: { "X-Submission-Token": token },
+        headers: submissionHeaders(token),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "撤回失败（" + response.status + "）");
@@ -1059,7 +1091,7 @@ async function deleteSubmission(id, token, button) {
     try {
       const response = await fetch("/api/submissions/" + encodeURIComponent(id), {
         method: "DELETE",
-        headers: { "X-Submission-Token": token },
+        headers: submissionHeaders(token),
       });
       // 记录已不存在（404）同样按删除成功处理，否则本地残留永远清不掉。
       if (!response.ok && response.status !== 404) {
@@ -1097,7 +1129,7 @@ async function clearAllSubmissions() {
       try {
         const response = await fetch("/api/submissions/" + encodeURIComponent(reference.id), {
           method: "DELETE",
-          headers: { "X-Submission-Token": reference.token },
+          headers: submissionHeaders(reference.token),
         });
         // 记录本来就不存在（404）也算清除成功。
         if (!response.ok && response.status !== 404) throw new Error("删除失败（" + response.status + "）");
@@ -1120,7 +1152,19 @@ async function clearAllSubmissions() {
 // 在普通浏览器中 window.Telegram 不存在，直接跳过。
 function initTelegramWebApp() {
   const tg = window.Telegram?.WebApp;
-  if (!tg) return;
+  let startParam = "";
+  try {
+    const params = new URLSearchParams(window.location.search);
+    startParam = String(
+      tg?.initDataUnsafe?.start_param ||
+      params.get("tgWebAppStartParam") ||
+      params.get("startapp") ||
+      "",
+    ).trim();
+  } catch {
+    startParam = "";
+  }
+  if (!tg) return { initData: "", startParam };
   try {
     tg.ready();
     tg.expand();
@@ -1128,6 +1172,7 @@ function initTelegramWebApp() {
   } catch {
     // 旧版本 SDK 或非 Telegram 环境：忽略即可。
   }
+  return { initData: String(tg.initData || "").trim(), startParam };
 }
 
 // 两步确认：原生 confirm 弹窗在 Telegram Mini App 里很突兀，这里改成
@@ -1199,5 +1244,21 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") disarmCardDelete();
 });
 
-loadAll();
-initTelegramWebApp();
+async function initializeSubmissionPage() {
+  const telegram = initTelegramWebApp();
+  telegramInitData = telegram.initData;
+  miniAppStartParam = telegram.startParam;
+  await loadAll();
+
+  if (miniAppStartParam.startsWith("resubmit_")) {
+    const id = miniAppStartParam.slice("resubmit_".length);
+    const item = currentItems.find((entry) => entry.submission.id === id);
+    if (item) {
+      selectSubmission(item.submission.id, item.token, item.submission, { edit: true });
+    } else {
+      showToast("没有找到这条待重新提交的记录，请从「我的提交」中重新打开。", true);
+    }
+  }
+}
+
+initializeSubmissionPage();
