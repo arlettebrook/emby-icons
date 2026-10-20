@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as telegramAdminRoute from "../functions/api/admin/telegram.js";
 import {
   handleAdminTelegramSettings,
   handleTelegramWebhook,
@@ -26,7 +27,7 @@ const CHAT_ID = "7328767184";
 const USER_ID = "1001";
 const BOT_TOKEN = "123456:TEST-TOKEN";
 
-function installTelegramFetchMock({ fail } = {}) {
+function installTelegramFetchMock({ fail, webhookInfo } = {}) {
   let nextMessageId = 100;
   const calls = [];
   const original = globalThis.fetch;
@@ -42,7 +43,10 @@ function installTelegramFetchMock({ fail } = {}) {
     const method = target.slice(target.lastIndexOf("/") + 1);
     const error = fail?.(method, payload);
     if (error) return new Response(JSON.stringify({ ok: false, description: error }), { status: 400 });
-    return new Response(JSON.stringify({ ok: true, result: { message_id: ++nextMessageId } }), {
+    const result = method === "getWebhookInfo"
+      ? (typeof webhookInfo === "function" ? webhookInfo(calls) : (webhookInfo || {}))
+      : { message_id: ++nextMessageId };
+    return new Response(JSON.stringify({ ok: true, result }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -79,7 +83,7 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   assert.equal(menuButton.payload.menu_button.text, "提交图标");
   assert.equal(
     menuButton.payload.menu_button.web_app.url,
-    "https://t.me/emby_icons_bot/submit?startapp=menu",
+    "https://example.com/submit?startapp=menu",
   );
   const commandCalls = mock.method("setMyCommands");
   assert.equal(commandCalls.length, 2, "expected default and reviewer command menus");
@@ -130,7 +134,7 @@ function lastCardSend() {
 function lastSubmissionEntry() {
   return mock.method("sendMessage").filter((call) =>
     call.payload.reply_markup?.inline_keyboard?.flat()
-      .some((button) => String(button.url || button.web_app?.url || "").includes("t.me/emby_icons_bot/submit"))
+      .some((button) => String(button.url || button.web_app?.url || "").includes("/submit"))
   ).at(-1);
 }
 
@@ -776,14 +780,17 @@ telegramTest("a failed card edit leaves no invisible input session", async ({ en
   assert.match(mock.method("sendMessage").at(-1).payload.text, /审核卡片更新失败/);
 }, { mock: { fail: (method) => (method === "editMessageText" || method === "editMessageCaption") ? "Telegram unavailable" : "" } });
 
-telegramTest("disabling Telegram makes an old authenticated webhook inert", async ({ env, secret }) => {
-  const id = await createSubmission(env, "Disabled", "https://example.com/disabled.png");
+telegramTest("disabling notifications keeps private commands available", async ({ env, secret }) => {
   const config = JSON.parse(env.__kv.get("settings/telegram.json"));
   config.enabled = false;
   await env.EMBY_ICONS.put("settings/telegram.json", JSON.stringify(config));
-  const response = await callback(secret, env, `approve:${id}`);
-  assert.equal(response.status, 404);
-  assert.equal(env.DB.submissions.get(id).status, "pending");
+
+  const response = await message(secret, env, "/submit", 32, { userId: "9010", chatId: "9010" });
+  assert.equal(response.status, 200);
+  const entry = lastSubmissionEntry();
+  assert.ok(entry, "expected /submit to reply even when notifications are disabled");
+  assert.equal(entry.payload.chat_id, "9010");
+  assert.equal(await notifyNewSubmission(env, { id: "disabled", name: "Disabled", url: "https://example.com/disabled.png", note: "" }), false);
 });
 
 
@@ -844,7 +851,7 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "🖼 提交图标");
     assert.equal(
       entry.payload.reply_markup.inline_keyboard[0][0].web_app.url,
-      "https://t.me/emby_icons_bot/submit?startapp=channel8",
+      "https://example.com/submit?startapp=channel8",
     );
     assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].url, undefined);
   } finally {
@@ -882,7 +889,7 @@ test("/submit opens the submission Mini App from a private chat", async () => {
     const button = entry.payload.reply_markup.inline_keyboard[0][0];
     assert.match(entry.payload.text, /打开图标提交页面/);
     assert.equal(button.text, "🖼 打开图标提交");
-    assert.equal(button.web_app.url, "https://t.me/emby_icons_bot/submit?startapp=command");
+    assert.equal(button.web_app.url, "https://example.com/submit?startapp=command");
     assert.equal(button.url, undefined);
     assert.equal(mock.method("forwardMessage").length, 0);
   } finally {
@@ -998,6 +1005,10 @@ test("a failed submission entry stays best-effort and is recorded", async () => 
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-submit-entry-failed");
     assert.ok(audit, "expected the entry failure to be recorded");
     assert.match(audit.detailsJson, /inline keyboard URL is invalid/);
+    const fallback = mock.method("sendMessage").find((call) =>
+      !call.payload.reply_markup && /t\.me\/emby_icons_bot\/submit\?startapp=channel8/.test(call.payload.text)
+    );
+    assert.ok(fallback, "a rejected inline keyboard must be followed by a plain link reply");
   } finally {
     mock.restore();
   }
@@ -1058,7 +1069,7 @@ test("a failed command menu does not block saving Telegram settings", async () =
   }
 });
 
-test("disabling Telegram clears registered command menus", async () => {
+test("disabling notifications keeps the webhook and command menus registered", async () => {
   mock = installTelegramFetchMock();
   try {
     const env = createEnvironment({ icons: [] });
@@ -1071,15 +1082,65 @@ test("disabling Telegram clears registered command menus", async () => {
       }),
       env,
     );
+    const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(mock.method("deleteWebhook").length, 1);
-    assert.equal(mock.method("setChatMenuButton").at(-1).payload.menu_button.type, "default");
-    const commandDeletes = mock.method("deleteMyCommands");
-    assert.equal(commandDeletes.length, 2, "expected default and reviewer command menus to be removed");
-    assert.deepEqual(commandDeletes[0].payload, {});
-    assert.equal(commandDeletes[1].payload.scope.type, "chat");
-    assert.equal(commandDeletes[1].payload.scope.chat_id, Number(CHAT_ID));
+    assert.equal(body.enabled, false);
+    assert.equal(body.webhookConfigured, true);
+    assert.equal(mock.method("deleteWebhook").length, 0);
+    assert.equal(mock.method("setWebhook").length, 2, "saving should keep the webhook in place");
+    assert.equal(mock.method("setChatMenuButton").at(-1).payload.menu_button.type, "web_app");
+    assert.equal(mock.method("setMyCommands").length, 4, "public and reviewer menus remain registered");
+    assert.equal(mock.method("deleteMyCommands").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("admin Telegram route exposes the webhook sync POST handler", () => {
+  assert.equal(typeof telegramAdminRoute.onRequestPost, "function");
+  assert.equal(typeof telegramAdminRoute.onRequestGet, "function");
+  assert.equal(typeof telegramAdminRoute.onRequestPut, "function");
+});
+
+test("admin webhook sync reports a redacted diagnostic without exposing secrets", async () => {
+  mock = installTelegramFetchMock({
+    webhookInfo: () => ({
+      url: mock.method("setWebhook").at(-1).payload.url,
+      pending_update_count: 2,
+      last_error_message: "Conflict: terminated by other getUpdates request",
+    }),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    await configureTelegram(env);
+
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ action: "sync" }),
+      }),
+      env,
+    );
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+
+    assert.equal(response.status, 200);
+    assert.equal(body.synced, true);
+    assert.equal(body.webhookConfigured, true);
+    assert.equal(body.menuConfigured, true);
+    assert.equal(body.commandsConfigured, true);
+    assert.equal(body.webhook.matchesExpected, true);
+    assert.equal(body.webhook.pendingUpdateCount, 2);
+    assert.match(body.webhook.lastErrorMessage, /terminated by other getUpdates/);
+    assert.match(body.webhook.url, /\/api\/telegram\/webhook\/\*\*\*$/);
+    const webhookSecret = String(mock.method("setWebhook").at(-1).payload.url).split("/").at(-1);
+    assert.ok(webhookSecret);
+    assert.doesNotMatch(serialized, /TEST-TOKEN/);
+    assert.equal(serialized.includes(webhookSecret), false, "the webhook secret must be redacted");
+    assert.equal(mock.method("setWebhook").length, 2);
+    assert.equal(mock.method("getWebhookInfo").length, 1);
   } finally {
     mock.restore();
   }
@@ -1377,7 +1438,7 @@ telegramTest("/my and the Telegram submission list expose only the current users
   await message(secret, env, "/my", 31, { userId: "9106", chatId: "9106" });
   const entry = mock.method("sendMessage").at(-1);
   assert.equal(entry.payload.chat_id, "9106");
-  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].web_app.url, "https://t.me/emby_icons_bot/submit?startapp=my");
+  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].web_app.url, "https://example.com/submit?startapp=my");
 
   const response = await handleMySubmissionList(
     new Request("https://example.com/api/my/submissions", {
@@ -1419,7 +1480,7 @@ telegramTest("rejection notification includes the reason and a resubmit Mini App
   assert.equal(button.text, "🔁 重新提交");
   assert.equal(
     button.web_app.url,
-    "https://t.me/emby_icons_bot/submit?startapp=resubmit_" + encodeURIComponent(id),
+    "https://example.com/submit?startapp=resubmit_" + encodeURIComponent(id),
   );
 });
 

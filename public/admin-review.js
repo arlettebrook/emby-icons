@@ -10,6 +10,7 @@ const telegramChatId = document.querySelector("#telegram-chat-id");
 const telegramTokenNote = document.querySelector("#telegram-token-note");
 const telegramStatus = document.querySelector("#telegram-settings-status");
 const telegramSaveButton = document.querySelector("#telegram-save-button");
+const telegramSyncButton = document.querySelector("#telegram-sync-button");
 const filter = document.querySelector("#moderation-filter");
 const searchInput = document.querySelector("#moderation-search");
 const reviewerFilter = document.querySelector("#moderation-reviewer");
@@ -82,13 +83,39 @@ async function saveTelegramSettings() {
     telegramTokenNote.textContent = result.configured
       ? "当前已配置 Bot Token；留空保存时不会覆盖它。"
       : "Token 会加密保存在服务端，不会回显到页面。";
-    if (result.warning) setTelegramStatus(result.warning, "error");
-    else if (result.enabled && !result.webhookConfigured) setTelegramStatus("配置已保存，但 Webhook 尚未就绪", "error");
-    else setTelegramStatus(result.enabled ? "通知已开启，保存成功" : "通知已关闭，保存成功", "success");
+    if (result.warning) setTelegramStatus(result.warning, "warning");
+    else if (!result.webhookConfigured && result.configured) setTelegramStatus("配置已保存；Webhook 尚未就绪，请点击「同步 Webhook」。", "warning");
+    else setTelegramStatus(result.enabled ? "通知已开启；机器人命令保持可用。" : "通知已关闭；机器人命令保持可用。", "success");
   } catch (error) {
     setTelegramStatus(error.message, "error");
   } finally {
     telegramSaveButton.disabled = false;
+  }
+}
+
+async function syncTelegramWebhook() {
+  telegramSyncButton.disabled = true;
+  setTelegramStatus("正在同步 Webhook 与命令菜单…");
+  try {
+    const response = await fetch("/api/admin/telegram", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({ action: "sync" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `同步 Webhook 失败（${response.status}）`);
+    const pending = Number(result.webhook?.pendingUpdateCount || 0);
+    const details = [];
+    if (pending > 0) details.push(`待处理更新 ${pending} 条`);
+    if (result.webhook?.matchesExpected === false) details.push("Telegram 端状态尚未更新");
+    if (result.webhook?.lastErrorMessage) details.push(`最近错误：${result.webhook.lastErrorMessage}`);
+    if (result.warning) details.push(result.warning);
+    const suffix = details.length ? `（${details.join("；")}）` : "";
+    setTelegramStatus(`Webhook 已同步，命令菜单已更新${suffix}。`, details.length ? "warning" : "success");
+  } catch (error) {
+    setTelegramStatus(error.message, "error");
+  } finally {
+    telegramSyncButton.disabled = false;
   }
 }
 
@@ -327,6 +354,7 @@ dialog?.addEventListener("click", (event) => {
   if (event.target === dialog) dialog.close();
 });
 telegramSaveButton?.addEventListener("click", saveTelegramSettings);
+telegramSyncButton?.addEventListener("click", syncTelegramWebhook);
 if (window.location.hash === "#moderation") dialog?.showModal();
 loadQueue();
 loadTelegramSettings();

@@ -6,10 +6,7 @@ const ANNOUNCEMENT_CHANNEL = "@MikuNaNChannel";
 const ANNOUNCEMENT_MESSAGE_ID = 8;
 const ANNOUNCEMENT_URL = "https://t.me/MikuNaNChannel/8";
 const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
-const SUBMIT_ENTRY_URL = `${SUBMIT_MINI_APP_URL}?startapp=channel8`;
-const SUBMIT_MENU_URL = `${SUBMIT_MINI_APP_URL}?startapp=menu`;
-const SUBMIT_COMMAND_URL = `${SUBMIT_MINI_APP_URL}?startapp=command`;
-const MY_SUBMISSIONS_URL = `${SUBMIT_MINI_APP_URL}?startapp=my`;
+const DEFAULT_PUBLIC_ORIGIN = "https://emby-icons.lyra.cc.cd";
 const PUBLIC_COMMANDS = [
   { command: "start", description: "查看公告与提交入口" },
   { command: "help", description: "查看帮助与提交入口" },
@@ -32,7 +29,7 @@ const CAPTION_LIMIT = 1024;
 const QUEUE_LIMIT = 50;
 const QUEUE_PAGE_SIZE = 10;
 const MAX_EDIT_NOTE_LENGTH = 1000;
-const COMMANDS_VERSION = "20261020-1";
+const COMMANDS_VERSION = "20261020-2";
 const COMMANDS_VERSION_KEY = "settings/telegram/commands-version";
 const ANNOUNCEMENT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const ANNOUNCEMENT_COOLDOWN_PREFIX = "settings/telegram/announcement/";
@@ -40,7 +37,7 @@ const ANNOUNCEMENT_COOLDOWN_PREFIX = "settings/telegram/announcement/";
 function responseHeaders(request) {
   return {
     "Access-Control-Allow-Origin": new URL(request.url).origin,
-    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
@@ -212,11 +209,12 @@ async function readSettings(env) {
       // Legacy group/channel configurations are ignored instead of being
       // allowed to keep receiving review cards.
       chatId: isPrivateChatId(storedChatId) ? storedChatId : "",
+      origin: normalizePublicOrigin(parsed.origin),
       token: await decryptToken(parsed.token, env),
       webhookSecret: await decryptToken(parsed.webhookSecret, env),
     };
   } catch {
-    throw new Error("Telegram settings are invalid or cannot be decrypted");
+    throw new Error("Telegram 配置无法解密，请重新填写 Bot Token 后保存以恢复。");
   }
 }
 
@@ -225,6 +223,7 @@ function publicSettings(settings) {
     enabled: settings.enabled,
     configured: Boolean(settings.token),
     chatId: settings.chatId,
+    origin: settings.origin || "",
     webhookConfigured: Boolean(settings.webhookSecret),
   };
 }
@@ -273,14 +272,43 @@ async function setTelegramWebhook(token, origin, secret) {
   });
 }
 
-async function setTelegramSubmitMenuButton(token) {
+async function setTelegramSubmitMenuButton(token, origin = DEFAULT_PUBLIC_ORIGIN) {
   await telegramApi(token, "setChatMenuButton", {
     menu_button: {
       type: "web_app",
       text: "提交图标",
-      web_app: { url: SUBMIT_MENU_URL },
+      web_app: { url: miniAppUrl("menu", origin) },
     },
   });
+}
+
+function normalizePublicOrigin(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function effectivePublicOrigin(env, settings, fallback = "") {
+  // An explicit deployment setting wins over a stale value saved in KV. During
+  // an admin save, the request origin is preferred over the previous record so
+  // moving the Pages project to a new domain repairs itself on the next save.
+  return normalizePublicOrigin(env?.PUBLIC_ORIGIN)
+    || normalizePublicOrigin(fallback)
+    || normalizePublicOrigin(settings?.origin)
+    || DEFAULT_PUBLIC_ORIGIN;
+}
+
+function miniAppUrl(startapp, origin = DEFAULT_PUBLIC_ORIGIN) {
+  const base = `${effectivePublicOrigin(null, { origin }, origin)}/submit`;
+  return startapp ? `${base}?startapp=${encodeURIComponent(startapp)}` : base;
+}
+
+function telegramMiniAppUrl(startapp) {
+  return `${SUBMIT_MINI_APP_URL}${startapp ? `?startapp=${encodeURIComponent(startapp)}` : ""}`;
 }
 
 function commandChatId(chatId) {
@@ -291,8 +319,14 @@ function commandChatId(chatId) {
 
 // Telegram only accepts web_app buttons in private chats. Groups and channels
 // keep the plain URL button so the same helper is safe everywhere.
-function miniAppButton(text, url, chatType = "private") {
-  return chatType === "private" ? { text, web_app: { url } } : { text, url };
+function miniAppButton(text, startapp, chatType = "private", origin = DEFAULT_PUBLIC_ORIGIN) {
+  const publicOrigin = effectivePublicOrigin(null, { origin }, origin);
+  if (chatType === "private" && new URL(publicOrigin).protocol === "https:") {
+    return { text, web_app: { url: miniAppUrl(startapp, publicOrigin) } };
+  }
+  // Plain URL buttons work in groups and also keep commands usable when a
+  // deployment has not configured an HTTPS Mini App origin yet.
+  return { text, url: telegramMiniAppUrl(startapp) };
 }
 
 function telegramChatType(chatId) {
@@ -349,19 +383,22 @@ async function resetTelegramCommands(token, chatId) {
 }
 
 async function ensureWebhookForSettings(env, settings, origin) {
-  if (settings.webhookSecret || !origin) return false;
+  if (settings.webhookSecret) return false;
   const webhookSecret = createSecret();
+  const webhookOrigin = effectivePublicOrigin(env, settings, origin);
   const record = {
     version: 1,
     enabled: settings.enabled,
     chatId: settings.chatId,
+    origin: webhookOrigin,
     token: await encryptToken(settings.token, env),
     webhookSecret: await encryptToken(webhookSecret, env),
     updatedAt: Date.now(),
   };
   await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify(record));
-  await setTelegramWebhook(settings.token, origin, webhookSecret);
+  await setTelegramWebhook(settings.token, webhookOrigin, webhookSecret);
   settings.webhookSecret = webhookSecret;
+  settings.origin = webhookOrigin;
   return true;
 }
 
@@ -376,7 +413,7 @@ async function sendTelegramMessage(token, chatId, text, replyMarkup) {
 
 // 公告和提交入口是两条消息：Telegram 不允许给已转发的频道消息追加按钮，
 // 因此用一条独立的轻提示承载 Mini App 入口。该入口只在私聊中使用。
-async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
+async function sendSubmissionEntry(env, token, chatId, messageThreadId, origin = DEFAULT_PUBLIC_ORIGIN) {
   try {
     await telegramApi(token, "sendMessage", {
       chat_id: chatId,
@@ -385,19 +422,24 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
         inline_keyboard: [
-          [miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, telegramChatType(chatId))],
-          [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, telegramChatType(chatId))],
+          [miniAppButton("🖼 提交图标", "channel8", telegramChatType(chatId), origin)],
+          [miniAppButton("📋 我的提交", "my", telegramChatType(chatId), origin)],
         ],
       },
     });
   } catch (error) {
-    // 入口是公告之外的附加引导，失败时不能把一次成功的公告发送变成 Webhook 异常。
     await writeAuditLog(env, {
       actorId: "telegram",
       action: "telegram-submit-entry-failed",
       targetId: String(chatId),
       details: { error: String(error?.message || "Submission entry failed").slice(0, 240) },
     }).catch(() => {});
+    // A failed inline keyboard must not hide the Mini App link completely.
+    await sendTelegramMessage(
+      token,
+      chatId,
+      `提交图标：${telegramMiniAppUrl("channel8")}\n我的提交：${telegramMiniAppUrl("my")}`,
+    ).catch(() => {});
   }
 }
 
@@ -405,8 +447,8 @@ async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
   const chatType = telegramChatType(chatId);
   const keyboard = {
     inline_keyboard: [
-      [miniAppButton("🖼 打开图标提交", SUBMIT_COMMAND_URL, chatType)],
-      [miniAppButton("📋 查看我的提交", MY_SUBMISSIONS_URL, chatType)],
+      [miniAppButton("🖼 打开图标提交", "command", chatType, settings.origin)],
+      [miniAppButton("📋 查看我的提交", "my", chatType, settings.origin)],
     ],
   };
   try {
@@ -424,12 +466,20 @@ async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
       targetId: String(chatId),
       details: { error: String(error?.message || "Submit command failed").slice(0, 240) },
     }).catch(() => {});
+    // Telegram can reject a web_app button when the Mini App domain is not
+    // configured correctly. Reply with a plain t.me link so /submit never
+    // turns into a silent no-op.
+    await sendTelegramMessage(
+      settings.token,
+      chatId,
+      `打开图标提交页面：${telegramMiniAppUrl("command")}`,
+    ).catch(() => {});
   }
 }
 
 async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
   const keyboard = {
-    inline_keyboard: [[miniAppButton("📋 查看我的提交", MY_SUBMISSIONS_URL, telegramChatType(chatId))]],
+    inline_keyboard: [[miniAppButton("📋 查看我的提交", "my", telegramChatType(chatId), settings.origin)]],
   };
   try {
     await telegramApi(settings.token, "sendMessage", {
@@ -446,6 +496,11 @@ async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
       targetId: String(chatId),
       details: { error: String(error?.message || "My submissions command failed").slice(0, 240) },
     }).catch(() => {});
+    await sendTelegramMessage(
+      settings.token,
+      chatId,
+      `查看我的提交：${telegramMiniAppUrl("my")}`,
+    ).catch(() => {});
   }
 }
 
@@ -475,14 +530,14 @@ async function rememberAnnouncementShown(env, userId) {
   }
 }
 
-function announcementShortKeyboard(chatId) {
+function announcementShortKeyboard(chatId, origin = DEFAULT_PUBLIC_ORIGIN) {
   const chatType = telegramChatType(chatId);
   const buttons = [
     [
       { text: "📣 查看公告", url: ANNOUNCEMENT_URL },
-      miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, chatType),
+      miniAppButton("🖼 提交图标", "channel8", chatType, origin),
     ],
-    [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, chatType)],
+    [miniAppButton("📋 我的提交", "my", chatType, origin)],
   ];
   if (chatType === "private") {
     buttons.push([{ text: "🔁 重新查看公告", callback_data: "announcement:show" }]);
@@ -500,7 +555,7 @@ async function sendAnnouncementShortcut(env, settings, chatId, messageThreadId, 
       text,
       disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-      reply_markup: announcementShortKeyboard(chatId),
+      reply_markup: announcementShortKeyboard(chatId, settings.origin),
     });
   } catch (error) {
     await writeAuditLog(env, {
@@ -509,6 +564,11 @@ async function sendAnnouncementShortcut(env, settings, chatId, messageThreadId, 
       targetId: String(chatId),
       details: { error: String(error?.message || "Announcement shortcut failed").slice(0, 240) },
     }).catch(() => {});
+    await sendTelegramMessage(
+      settings.token,
+      chatId,
+      `公告：${ANNOUNCEMENT_URL}\n提交图标：${telegramMiniAppUrl("channel8")}`,
+    ).catch(() => {});
   }
 }
 
@@ -551,7 +611,7 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId, { force 
   }
   if (delivered) {
     await rememberAnnouncementShown(env, userId);
-    await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
+    await sendSubmissionEntry(env, settings.token, chatId, messageThreadId, settings.origin);
     return;
   }
   await writeAuditLog(env, {
@@ -571,7 +631,7 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId, { force 
     ? "\n\n公告自动转发未成功，已提供公告链接。"
     : "";
   await sendTelegramMessage(settings.token, chatId, fallback + quietNotice);
-  await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
+  await sendSubmissionEntry(env, settings.token, chatId, messageThreadId, settings.origin);
 }
 
 // /help is intentionally richer than /start: it documents the public commands
@@ -599,8 +659,8 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
   ].join("\n");
   const keyboard = {
     inline_keyboard: [
-      [miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, chatType)],
-      [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, chatType)],
+      [miniAppButton("🖼 提交图标", "channel8", chatType, settings.origin)],
+      [miniAppButton("📋 我的提交", "my", chatType, settings.origin)],
       [{ text: "📣 查看公告", url: ANNOUNCEMENT_URL }],
     ],
   };
@@ -620,6 +680,16 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
       targetId: String(chatId),
       details: { error: String(error?.message || "Help entry failed").slice(0, 240) },
     }).catch(() => {});
+    await sendTelegramMessage(
+      settings.token,
+      chatId,
+      [
+        "Emby 图标库帮助",
+        `提交图标：${telegramMiniAppUrl("command")}`,
+        `我的提交：${telegramMiniAppUrl("my")}`,
+        `公告：${ANNOUNCEMENT_URL}`,
+      ].join("\n"),
+    ).catch(() => {});
   }
 }
 
@@ -931,22 +1001,63 @@ async function findSubmissionConflict(env, name, { strict = false, excludeId = "
   }
 }
 
+function redactedWebhookUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return `${url.origin}/api/telegram/webhook/***`;
+  } catch {
+    return "";
+  }
+}
+
+function webhookDiagnostic(expectedUrl, info) {
+  const pending = Number(info?.pending_update_count);
+  const lastErrorDate = Number(info?.last_error_date);
+  return {
+    url: redactedWebhookUrl(info?.url),
+    matchesExpected: Boolean(info?.url) && info.url === expectedUrl,
+    pendingUpdateCount: Number.isFinite(pending) && pending > 0 ? pending : 0,
+    lastErrorMessage: String(info?.last_error_message || "").trim().slice(0, 240),
+    lastErrorDate: Number.isFinite(lastErrorDate) && lastErrorDate > 0 ? lastErrorDate : 0,
+  };
+}
+
+async function auditTelegramRuntimeFailure(env, action, targetId, error) {
+  await writeAuditLog(env, {
+    actorId: "system",
+    action,
+    targetId,
+    details: { error: String(error?.message || error || "Telegram runtime setup failed").slice(0, 240) },
+  }).catch(() => {});
+}
+
 export async function handleAdminTelegramSettings(request, env) {
   const authError = await requireAdmin(request, env);
   if (authError) return authError;
   if (!env.EMBY_ICONS) return jsonResponse(request, { error: "EMBY_ICONS KV is not configured" }, { status: 503 });
 
   let current;
+  let settingsCorrupt = false;
   try {
     current = await readSettings(env);
   } catch (error) {
-    // Allow an administrator to replace a stale/corrupt record by submitting a new Token.
-    if (request.method !== "PUT") return jsonResponse(request, { error: error.message }, { status: 500 });
-    current = { enabled: false, chatId: "", token: "" };
+    settingsCorrupt = true;
+    current = { enabled: false, chatId: "", origin: "", token: "", webhookSecret: "" };
+    if (request.method === "GET") {
+      return jsonResponse(request, {
+        code: "TELEGRAM_SETTINGS_CORRUPT",
+        error: error.message,
+      }, { status: 500 });
+    }
+    if (request.method !== "PUT") {
+      return jsonResponse(request, {
+        code: "TELEGRAM_SETTINGS_CORRUPT",
+        error: error.message,
+      }, { status: 409 });
+    }
   }
 
   if (request.method === "GET") return jsonResponse(request, publicSettings(current));
-  if (request.method !== "PUT") return jsonResponse(request, { error: "Method not allowed" }, { status: 405 });
 
   let body;
   try {
@@ -958,6 +1069,101 @@ export async function handleAdminTelegramSettings(request, env) {
     return jsonResponse(request, { error: "Request body must be an object" }, { status: 400 });
   }
 
+  if (request.method === "POST") {
+    if (body.action !== "sync") return jsonResponse(request, { error: "Unsupported Telegram action" }, { status: 400 });
+    if (!current.token || !current.webhookSecret) {
+      return jsonResponse(request, {
+        code: "TELEGRAM_NOT_CONFIGURED",
+        error: "请先保存有效的 Bot Token，再同步 Webhook。",
+      }, { status: 409 });
+    }
+
+    const origin = effectivePublicOrigin(env, current, new URL(request.url).origin);
+    const expectedUrl = `${origin}/api/telegram/webhook/${current.webhookSecret}`;
+    const warnings = [];
+    let webhookConfigured = false;
+    let menuConfigured = false;
+    let commandsConfigured = false;
+
+    try {
+      await setTelegramWebhook(current.token, origin, current.webhookSecret);
+      webhookConfigured = true;
+    } catch (error) {
+      warnings.push("Webhook 同步失败，请检查部署域名和 Bot Token。");
+      await auditTelegramRuntimeFailure(env, "telegram-webhook-sync-failed", SETTINGS_KEY, error);
+    }
+    try {
+      await setTelegramSubmitMenuButton(current.token, origin);
+      menuConfigured = true;
+    } catch (error) {
+      warnings.push("提交菜单同步失败，命令中的 Mini App 按钮仍可使用。");
+      await auditTelegramRuntimeFailure(env, "telegram-submit-menu-sync-failed", SETTINGS_KEY, error);
+    }
+    try {
+      await setTelegramCommands(current.token, current.chatId);
+      commandsConfigured = true;
+      await rememberCommandsVersion(env).catch(() => {});
+    } catch (error) {
+      warnings.push("Bot 命令菜单同步失败，/start 等命令本身不受影响。");
+      await auditTelegramRuntimeFailure(env, "telegram-commands-sync-failed", SETTINGS_KEY, error);
+    }
+
+    let info = null;
+    try {
+      info = await telegramApi(current.token, "getWebhookInfo", {});
+    } catch (error) {
+      warnings.push("暂时无法读取 Webhook 状态。");
+      await auditTelegramRuntimeFailure(env, "telegram-webhook-info-failed", SETTINGS_KEY, error);
+    }
+
+    if (origin !== current.origin) {
+      try {
+        await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify({
+          version: 1,
+          enabled: current.enabled,
+          chatId: current.chatId,
+          origin,
+          token: await encryptToken(current.token, env),
+          webhookSecret: await encryptToken(current.webhookSecret, env),
+          updatedAt: Date.now(),
+        }));
+      } catch (error) {
+        warnings.push("Webhook 已同步，但部署域名未能写回配置。");
+        await auditTelegramRuntimeFailure(env, "telegram-origin-save-failed", SETTINGS_KEY, error);
+      }
+    }
+
+    await writeAuditLog(env, {
+      actorId: "admin",
+      action: "telegram-webhook-synced",
+      targetId: SETTINGS_KEY,
+      details: { origin, webhookConfigured, menuConfigured, commandsConfigured },
+    }).catch(() => {});
+
+    return jsonResponse(request, {
+      ...publicSettings({ ...current, origin }),
+      synced: webhookConfigured,
+      webhookConfigured,
+      menuConfigured,
+      commandsConfigured,
+      webhook: webhookDiagnostic(expectedUrl, info),
+      warning: warnings.join(" "),
+      ...(webhookConfigured ? {} : { error: "Webhook 同步失败，请检查部署域名和 Bot Token。" }),
+    }, { status: webhookConfigured ? 200 : 502 });
+  }
+
+  if (request.method !== "PUT") return jsonResponse(request, { error: "Method not allowed" }, { status: 405 });
+
+  const suppliedBotToken = typeof body.botToken === "string" && body.botToken.trim()
+    ? body.botToken.trim()
+    : "";
+  if (settingsCorrupt && !suppliedBotToken) {
+    return jsonResponse(request, {
+      code: "TELEGRAM_SETTINGS_CORRUPT",
+      error: "Telegram 配置无法解密，请重新填写 Bot Token 后保存以恢复。",
+    }, { status: 400 });
+  }
+
   const enabled = body.enabled === true;
   const chatId = body.chatId === undefined ? current.chatId : String(body.chatId).trim();
   if (chatId.length > MAX_CHAT_ID_LENGTH) return jsonResponse(request, { error: "chatId is too long" }, { status: 400 });
@@ -967,16 +1173,18 @@ export async function handleAdminTelegramSettings(request, env) {
 
   let token = current.token;
   if (body.clearBotToken === true) token = "";
-  if (typeof body.botToken === "string" && body.botToken.trim()) token = body.botToken.trim();
+  if (suppliedBotToken) token = suppliedBotToken;
   if (token.length > MAX_TOKEN_LENGTH) return jsonResponse(request, { error: "botToken is too long" }, { status: 400 });
   if (enabled && !token) return jsonResponse(request, { error: "启用通知前请填写 Bot Token" }, { status: 400 });
   if (enabled && !chatId) return jsonResponse(request, { error: "启用通知前请填写 Chat ID" }, { status: 400 });
 
   const webhookSecret = current.webhookSecret || createSecret();
+  const origin = effectivePublicOrigin(env, current, new URL(request.url).origin);
   const record = {
     version: 1,
     enabled,
     chatId,
+    origin,
     token: token ? await encryptToken(token, env) : null,
     webhookSecret: token ? await encryptToken(webhookSecret, env) : null,
     updatedAt: Date.now(),
@@ -986,94 +1194,51 @@ export async function handleAdminTelegramSettings(request, env) {
   } catch {
     return jsonResponse(request, { error: "Telegram 配置保存失败，请检查 EMBY_ICONS KV 绑定" }, { status: 503 });
   }
-  try {
-    await writeAuditLog(env, {
-      actorId: "admin",
-      action: "telegram-settings-updated",
-      targetId: SETTINGS_KEY,
-      details: { enabled, configured: Boolean(token), chatId },
-    });
-  } catch (error) {
-    console.error("Telegram settings audit log failed", error);
-  }
+  await writeAuditLog(env, {
+    actorId: "admin",
+    action: "telegram-settings-updated",
+    targetId: SETTINGS_KEY,
+    details: { enabled, configured: Boolean(token), chatId, origin },
+  }).catch(() => {});
+
   let webhookConfigured = false;
   let menuConfigured = false;
   let commandsConfigured = false;
   const warnings = [];
-  if (token && enabled && chatId) {
+  if (token) {
+    // Notification delivery and bot commands share the same webhook. Turning
+    // notifications off must never remove the webhook or disable /start/help.
     try {
-      await setTelegramWebhook(token, new URL(request.url).origin, webhookSecret);
+      await setTelegramWebhook(token, origin, webhookSecret);
       webhookConfigured = true;
     } catch (error) {
-      warnings.push("Telegram Webhook 设置失败，请检查站点是否可被公网访问。");
-      await writeAuditLog(env, {
-        actorId: "system",
-        action: "telegram-webhook-failed",
-        targetId: SETTINGS_KEY,
-        details: { error: String(error.message || "Webhook setup failed").slice(0, 240) },
-      }).catch(() => {});
+      warnings.push("Webhook 尚未同步，请在部署完成后点击「同步 Webhook」。");
+      await auditTelegramRuntimeFailure(env, "telegram-webhook-failed", SETTINGS_KEY, error);
     }
     try {
-      await setTelegramSubmitMenuButton(token);
+      await setTelegramSubmitMenuButton(token, origin);
       menuConfigured = true;
     } catch (error) {
-      warnings.push("「提交图标」菜单设置失败，用户仍可通过 /start 或 /help 中的按钮进入 Mini App。");
-      await writeAuditLog(env, {
-        actorId: "system",
-        action: "telegram-submit-menu-failed",
-        targetId: SETTINGS_KEY,
-        details: { error: String(error.message || "Menu button setup failed").slice(0, 240) },
-      }).catch(() => {});
+      warnings.push("「提交图标」菜单设置失败，用户仍可通过 /start 或 /help 进入 Mini App。");
+      await auditTelegramRuntimeFailure(env, "telegram-submit-menu-failed", SETTINGS_KEY, error);
     }
     try {
       await setTelegramCommands(token, chatId);
       commandsConfigured = true;
-      try {
-        await rememberCommandsVersion(env);
-      } catch {
-        // The menu was already updated. A failed version marker only causes a
-        // harmless re-sync on the next webhook update.
-      }
+      await rememberCommandsVersion(env).catch(() => {});
     } catch (error) {
       warnings.push("Bot 命令菜单设置失败，用户仍可发送 /start 或 /help。");
-      await writeAuditLog(env, {
-        actorId: "system",
-        action: "telegram-commands-failed",
-        targetId: SETTINGS_KEY,
-        details: { error: String(error.message || "Bot command menu setup failed").slice(0, 240) },
-      }).catch(() => {});
-    }
-  } else if (token) {
-    try {
-      await telegramApi(token, "deleteWebhook", { drop_pending_updates: false });
-    } catch {
-      // Disabling notifications should still succeed when Telegram is unreachable.
-    }
-    try {
-      await telegramApi(token, "setChatMenuButton", { menu_button: { type: "default" } });
-    } catch {
-      // The notification setting should not depend on resetting an optional menu button.
-    }
-    try {
-      await resetTelegramCommands(token, chatId || current.chatId);
-    } catch {
-      // Disabling notifications should not depend on clearing optional bot commands.
-    }
-    try {
-      await env.EMBY_ICONS.delete(COMMANDS_VERSION_KEY);
-    } catch {
-      // Re-enabling will sync the menu even if this stale marker survives.
+      await auditTelegramRuntimeFailure(env, "telegram-commands-failed", SETTINGS_KEY, error);
     }
   }
   return jsonResponse(request, {
-    ...publicSettings({ enabled, chatId, token, webhookSecret }),
+    ...publicSettings({ enabled, chatId, origin, token, webhookSecret }),
     webhookConfigured,
     menuConfigured,
     commandsConfigured,
     warning: warnings.join(" "),
   });
 }
-
 export async function notifyNewSubmission(env, submission, origin = "") {
   const settings = await readSettings(env);
   if (!settings.enabled || !settings.token || !settings.chatId) return false;
@@ -1191,8 +1356,9 @@ export async function notifySubmissionResult(env, id) {
       : {
           inline_keyboard: [[miniAppButton(
             "🔁 重新提交",
-            `${SUBMIT_MINI_APP_URL}?startapp=resubmit_${encodeURIComponent(id)}`,
+            `resubmit_${id}`,
             "private",
+            settings.origin,
           )]],
         };
 
@@ -1846,7 +2012,7 @@ export async function handleTelegramWebhook(request, env, secretParam, waitUntil
   } catch {
     return new Response("Not found", { status: 404 });
   }
-  if (!settings.enabled || !settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
+  // The notification toggle only controls submission/review notifications.\n  // Commands and Mini App entry points must keep working after notifications are disabled.\n  if (!settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== settings.webhookSecret) return new Response("Not found", { status: 404 });
 
   // Command menus are versioned in KV so a deploy that adds a command does not

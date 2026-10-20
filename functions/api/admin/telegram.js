@@ -11,6 +11,10 @@ export function onRequestPut({ request, env }) {
   return handleAdminTelegramSettings(request, env);
 }
 
+export function onRequestPost({ request, env }) {
+  return handleAdminTelegramSettings(request, env);
+}
+
 export function onRequestOptions({ request }) {
   return handleTelegramOptions(request);
 }
