@@ -26,13 +26,38 @@ import {
 const CHAT_ID = "7328767184";
 const USER_ID = "1001";
 const BOT_TOKEN = "123456:TEST-TOKEN";
+const ANNOUNCEMENT_EMBED_URL = "https://t.me/MikuNaNChannel/8?embed=1&mode=tme";
+const ANNOUNCEMENT_EMBED_HTML = [
+  "<!doctype html><html><body>",
+  '<div class="tgme_widget_message_text js-message_text" dir="auto">',
+  '<i class="emoji"><b>🖼</b></i> Emby 自用图标库<br/><br/>',
+  "目前「2025.7.31」已收录 2500+ Emby 图标。<br/><br/>",
+  "自带GitHub代理加速。<br/><br/>",
+  "自带清理无效图标。<br/><br/>",
+  "导入地址： <code>https://emby-icons.lyra.cc.cd/emby-icons.json</code><br/><br/>",
+  "备用地址： <code>https://lyra.bbroot.com/emby-icons.json</code><br/><br/>",
+  '<a href="http://t.me/emby_icons_bot/submit" onclick="alert(1)">新增图标</a><br/><br/>',
+  '<a href="https://github.com/arlettebrook/emby-icons"><tg-spoiler><u>备用新增图标</u></tg-spoiler></a><br/><br/>',
+  "# <i>图标来自各位大佬，如不希望收录请 </i>",
+  '<a href="https://t.me/MikuNaNChannel?direct"><i>联系</i></a><i> 删除。</i><br/><br/>',
+  '<i class="emoji"><b>📢</b></i> 防失联频道： ',
+  '<a href="https://t.me/MikuNaNChannel">@MikuNaNChannel</a>',
+  "</div></body></html>",
+].join("");
 
-function installTelegramFetchMock({ fail, webhookInfo } = {}) {
+function installTelegramFetchMock({ fail, webhookInfo, announcementHtml = ANNOUNCEMENT_EMBED_HTML, announcementStatus = 200 } = {}) {
   let nextMessageId = 100;
   const calls = [];
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init = {}) => {
     const target = String(url);
+    if (target === ANNOUNCEMENT_EMBED_URL) {
+      calls.push({ url: target, method: "announcementEmbed", payload: {} });
+      return new Response(announcementHtml, {
+        status: announcementStatus,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
     let payload = {};
     try {
       payload = init.body ? JSON.parse(init.body) : {};
@@ -91,11 +116,11 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   const reviewerCommands = commandCalls.find((call) => call.payload.scope?.type === "chat");
   assert.deepEqual(
     defaultCommands.payload.commands.map((item) => item.command),
-    ["start", "help", "submit", "my"],
+    ["start", "icons", "help", "submit", "my"],
   );
   assert.deepEqual(
     reviewerCommands.payload.commands.map((item) => item.command),
-    ["start", "help", "submit", "my", "queue", "cancel", "reject", "skip"],
+    ["start", "icons", "help", "submit", "my", "queue", "cancel", "reject", "skip"],
   );
   assert.equal(reviewerCommands.payload.scope.chat_id, Number(chatId));
   return String(setWebhook.payload.url).slice(String(setWebhook.payload.url).lastIndexOf("/") + 1);
@@ -859,7 +884,48 @@ test("/start forwards the channel announcement to any user", async () => {
   }
 });
 
-test("repeated /start and /help always forward the full announcement", async () => {
+test("/icons directly forwards the channel announcement without an extra message", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/icons@MikuNaNBot", 21, { userId: "9001", chatId: "9001" });
+
+    const forwards = mock.method("forwardMessage");
+    assert.equal(forwards.length, 1);
+    assert.equal(forwards[0].payload.chat_id, "9001");
+    assert.equal(forwards[0].payload.from_chat_id, "@MikuNaNChannel");
+    assert.equal(forwards[0].payload.message_id, 8);
+    assert.equal(mock.method("copyMessage").length, 0);
+    assert.equal(mock.method("sendMessage").length, 0, "a successful /icons reply should be the forward itself");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("/icons keeps the channel content when forwarding is blocked", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => (method === "forwardMessage" ? "message can't be forwarded" : undefined),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/icons", 22, { userId: "9002", chatId: "9002" });
+
+    const copy = mock.method("copyMessage").at(-1);
+    assert.ok(copy, "expected a copy fallback");
+    assert.equal(copy.payload.chat_id, "9002");
+    assert.equal(copy.payload.from_chat_id, "@MikuNaNChannel");
+    assert.equal(copy.payload.message_id, 8);
+    assert.equal(mock.method("sendMessage").length, 0, "the copy is the complete /icons reply");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("/start forwards while /help embeds the announcement in its card", async () => {
   mock = installTelegramFetchMock();
   try {
     const env = createEnvironment({ icons: [] });
@@ -872,12 +938,23 @@ test("repeated /start and /help always forward the full announcement", async () 
     await message(secret, env, "/help", 24, options);
 
     const forwards = mock.method("forwardMessage");
-    assert.equal(forwards.length, 4, "every command should forward a fresh announcement");
+    assert.equal(forwards.length, 2, "only /start should forward the channel post");
     assert.ok(forwards.every((call) => (
       call.payload.chat_id === "9010"
       && call.payload.from_chat_id === "@MikuNaNChannel"
       && call.payload.message_id === 8
     )));
+    const helps = mock.method("sendMessage").filter((call) => (
+      call.payload.parse_mode === "HTML"
+      && String(call.payload.text || "").includes("📖 <b>Emby 图标库帮助</b>")
+    ));
+    assert.equal(helps.length, 2, "each /help should send one combined help card");
+    assert.ok(helps.every((call) => (
+      String(call.payload.text).includes("📌 <b>频道公告</b>")
+      && String(call.payload.text).includes("Emby 自用图标库")
+      && String(call.payload.text).includes("https://emby-icons.lyra.cc.cd/emby-icons.json")
+    )));
+    assert.equal(mock.method("announcementEmbed").length, 2);
     const replyText = mock.method("sendMessage")
       .map((call) => String(call.payload.text || ""))
       .join("\n");
@@ -886,8 +963,7 @@ test("repeated /start and /help always forward the full announcement", async () 
     mock.restore();
   }
 });
-
-test("/help also reaches the configured admin chat", async () => {
+test("/help sends one formatted card with the live channel content to the admin", async () => {
   mock = installTelegramFetchMock();
   try {
     const env = createEnvironment({ icons: [] });
@@ -895,16 +971,61 @@ test("/help also reaches the configured admin chat", async () => {
 
     await message(secret, env, "/help@MikuNaNBot", 22);
 
-    const forward = mock.method("forwardMessage").at(-1);
-    assert.ok(forward, "expected the admin to receive the announcement too");
-    assert.equal(forward.payload.chat_id, CHAT_ID);
-    assert.equal(forward.payload.from_chat_id, "@MikuNaNChannel");
-    assert.equal(forward.payload.message_id, 8);
+    const sends = mock.method("sendMessage");
+    assert.equal(sends.length, 1, "the announcement should not be sent as a second message");
+    const help = sends[0];
+    assert.equal(help.payload.chat_id, CHAT_ID);
+    assert.equal(help.payload.parse_mode, "HTML");
+    const text = String(help.payload.text || "");
+    assert.match(text, /📖 <b>Emby 图标库帮助<\/b>/);
+    assert.match(text, /<b>提交与查询<\/b>/);
+    assert.match(text, /• \/icons — 获取图标库与导入地址/);
+    assert.match(text, /<b>提交要求<\/b>/);
+    assert.match(text, /<b>常见问题<\/b>/);
+    assert.match(text, /📌 <b>频道公告<\/b>/);
+    assert.match(text, /<i><b>🖼<\/b><\/i> Emby 自用图标库/);
+    assert.match(text, /<code>https:\/\/emby-icons\.lyra\.cc\.cd\/emby-icons\.json<\/code>/);
+    assert.match(text, /<code>https:\/\/lyra\.bbroot\.com\/emby-icons\.json<\/code>/);
+    assert.match(text, /<a href="http:\/\/t\.me\/emby_icons_bot\/submit">新增图标<\/a>/);
+    assert.match(text, /<a href="https:\/\/github\.com\/arlettebrook\/emby-icons"><tg-spoiler><u>备用新增图标<\/u><\/tg-spoiler><\/a>/);
+    assert.match(text, /<i>图标来自各位大佬，如不希望收录请 <\/i>/);
+    assert.match(text, /<a href="https:\/\/t\.me\/MikuNaNChannel">@MikuNaNChannel<\/a>/);
+    assert.doesNotMatch(text, /class=|onclick=/);
+    assert.equal(
+      sends.some((call) => /需要提交图标？点击下方按钮/.test(String(call.payload.text || ""))),
+      false,
+      "help should not send the standalone submission CTA",
+    );
+    assert.equal(mock.method("forwardMessage").length, 0, "help must not forward a second announcement");
+    assert.equal(mock.method("announcementEmbed").length, 1);
   } finally {
     mock.restore();
   }
 });
 
+test("/help keeps the complete announcement when the channel embed is unavailable", async () => {
+  mock = installTelegramFetchMock({ announcementStatus: 503, announcementHtml: "" });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    await message(secret, env, "/help", 23);
+
+    const help = mock.method("sendMessage").find((call) => (
+      call.payload.parse_mode === "HTML"
+      && String(call.payload.text || "").includes("📖 <b>Emby 图标库帮助</b>")
+    ));
+    assert.ok(help, "expected the help card to use the formatted fallback");
+    assert.match(help.payload.text, /Emby 自用图标库/);
+    assert.match(help.payload.text, /https:\/\/emby-icons\.lyra\.cc\.cd\/emby-icons\.json/);
+    assert.match(help.payload.text, /https:\/\/lyra\.bbroot\.com\/emby-icons\.json/);
+    assert.match(help.payload.text, /<tg-spoiler><u>备用新增图标<\/u><\/tg-spoiler>/);
+    assert.equal(mock.method("forwardMessage").length, 0);
+    assert.equal(mock.method("announcementEmbed").length, 1);
+  } finally {
+    mock.restore();
+  }
+});
 test("/submit opens the submission Mini App from a private chat", async () => {
   mock = installTelegramFetchMock();
   try {
@@ -974,7 +1095,7 @@ test("the admin sees why the announcement could not be forwarded", async () => {
     const env = createEnvironment({ icons: [] });
     const secret = await configureTelegram(env);
 
-    await message(secret, env, "/help", 26);
+    await message(secret, env, "/start", 26);
 
     const send = mock.method("sendMessage").find((call) =>
       !call.payload.reply_markup && /MikuNaNChannel\/8/.test(call.payload.text)
@@ -982,7 +1103,10 @@ test("the admin sees why the announcement could not be forwarded", async () => {
     assert.match(send.payload.text, /MikuNaNChannel\/8/);
     assert.match(send.payload.text, /公告自动转发未成功，已提供公告链接/);
     assert.doesNotMatch(send.payload.text, /message can't be forwarded|chat not found|Bad Request/);
-    assert.ok(lastSubmissionEntry(), "expected a submission entry after the link fallback");
+    assert.ok(
+      mock.method("sendMessage").some((call) => /需要提交图标？点击下方按钮/.test(String(call.payload.text || ""))),
+      "expected /start to keep its submission CTA after the forward failure",
+    );
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-announcement-failed");
     assert.ok(audit, "expected the failure to be recorded");
     assert.match(audit.detailsJson, /chat not found/);
