@@ -199,12 +199,13 @@ function isPrivateChatId(value) {
 async function readSettings(env) {
   if (!env.EMBY_ICONS) throw new Error("EMBY_ICONS KV is not configured");
   const raw = await env.EMBY_ICONS.get(SETTINGS_KEY);
-  if (!raw) return { enabled: false, chatId: "", token: "" };
+  if (!raw) return { enabled: false, botDisabled: false, chatId: "", token: "" };
   try {
     const parsed = JSON.parse(raw);
     const storedChatId = typeof parsed.chatId === "string" ? parsed.chatId.trim() : "";
     return {
       enabled: parsed.enabled === true,
+      botDisabled: parsed.botDisabled === true,
       // Legacy group/channel configurations are ignored instead of being
       // allowed to keep receiving review cards.
       chatId: isPrivateChatId(storedChatId) ? storedChatId : "",
@@ -220,10 +221,11 @@ async function readSettings(env) {
 function publicSettings(settings) {
   return {
     enabled: settings.enabled,
+    botDisabled: settings.botDisabled === true,
     configured: Boolean(settings.token),
     chatId: settings.chatId,
     origin: settings.origin || "",
-    webhookConfigured: Boolean(settings.webhookSecret),
+    webhookConfigured: Boolean(settings.webhookSecret) && settings.botDisabled !== true,
   };
 }
 
@@ -277,6 +279,14 @@ async function setTelegramCommandMenuButton(token) {
   // buttons, so the menu itself is not mislabeled as a submit action.
   await telegramApi(token, "setChatMenuButton", {
     menu_button: { type: "commands" },
+  });
+}
+
+async function resetTelegramCommandMenuButton(token) {
+  // Telegram has no deleteChatMenuButton method. Resetting to "default"
+  // removes the custom command button after the commands themselves are gone.
+  await telegramApi(token, "setChatMenuButton", {
+    menu_button: { type: "default" },
   });
 }
 
@@ -346,7 +356,7 @@ async function rememberCommandsVersion(env) {
 }
 
 async function syncTelegramMenusIfNeeded(env, settings, waitUntil) {
-  if (!env.EMBY_ICONS || !settings?.token) return false;
+  if (!env.EMBY_ICONS || !settings?.token || settings.botDisabled) return false;
   let stored = "";
   try {
     stored = String(await env.EMBY_ICONS.get(COMMANDS_VERSION_KEY) || "");
@@ -400,6 +410,7 @@ async function ensureWebhookForSettings(env, settings, origin) {
   const record = {
     version: 1,
     enabled: settings.enabled,
+    botDisabled: settings.botDisabled === true,
     chatId: settings.chatId,
     origin: webhookOrigin,
     token: await encryptToken(settings.token, env),
@@ -1033,6 +1044,12 @@ export async function handleAdminTelegramSettings(request, env) {
 
   if (request.method === "POST") {
     if (body.action !== "sync") return jsonResponse(request, { error: "Unsupported Telegram action" }, { status: 400 });
+    if (current.botDisabled) {
+      return jsonResponse(request, {
+        code: "TELEGRAM_BOT_DISABLED",
+        error: "Bot 已彻底关闭，请先启用 Bot 后再同步 Webhook。",
+      }, { status: 409 });
+    }
     if (!current.token || !current.webhookSecret) {
       return jsonResponse(request, {
         code: "TELEGRAM_NOT_CONFIGURED",
@@ -1083,6 +1100,7 @@ export async function handleAdminTelegramSettings(request, env) {
         await env.EMBY_ICONS.put(SETTINGS_KEY, JSON.stringify({
           version: 1,
           enabled: current.enabled,
+          botDisabled: current.botDisabled === true,
           chatId: current.chatId,
           origin,
           token: await encryptToken(current.token, env),
@@ -1127,6 +1145,9 @@ export async function handleAdminTelegramSettings(request, env) {
   }
 
   const enabled = body.enabled === true;
+  const botDisabled = body.botDisabled === undefined
+    ? current.botDisabled === true
+    : body.botDisabled === true;
   const chatId = body.chatId === undefined ? current.chatId : String(body.chatId).trim();
   if (chatId.length > MAX_CHAT_ID_LENGTH) return jsonResponse(request, { error: "chatId is too long" }, { status: 400 });
   if (chatId && !isPrivateChatId(chatId)) {
@@ -1145,6 +1166,7 @@ export async function handleAdminTelegramSettings(request, env) {
   const record = {
     version: 1,
     enabled,
+    botDisabled,
     chatId,
     origin,
     token: token ? await encryptToken(token, env) : null,
@@ -1160,13 +1182,54 @@ export async function handleAdminTelegramSettings(request, env) {
     actorId: "admin",
     action: "telegram-settings-updated",
     targetId: SETTINGS_KEY,
-    details: { enabled, configured: Boolean(token), chatId, origin },
+    details: { enabled, botDisabled, configured: Boolean(token), chatId, origin },
   }).catch(() => {});
 
   let webhookConfigured = false;
   let menuConfigured = false;
   let commandsConfigured = false;
   const warnings = [];
+
+  if (botDisabled) {
+    let webhookDeleted = false;
+    let menuReset = false;
+    let commandsDeleted = false;
+    if (token) {
+      try {
+        await telegramApi(token, "deleteWebhook", { drop_pending_updates: true });
+        webhookDeleted = true;
+      } catch (error) {
+        warnings.push("Webhook 注销失败，但服务端已拒绝该 Bot 的所有更新；请稍后重新保存关闭状态。");
+        await auditTelegramRuntimeFailure(env, "telegram-webhook-delete-failed", SETTINGS_KEY, error);
+      }
+      try {
+        await resetTelegramCommands(token, chatId);
+        commandsDeleted = true;
+      } catch (error) {
+        warnings.push("Bot 命令菜单删除失败；请稍后重新保存关闭状态。");
+        await auditTelegramRuntimeFailure(env, "telegram-commands-delete-failed", SETTINGS_KEY, error);
+      }
+      try {
+        await resetTelegramCommandMenuButton(token);
+        menuReset = true;
+      } catch (error) {
+        warnings.push("Bot 菜单按钮恢复默认失败；请稍后重新保存关闭状态。");
+        await auditTelegramRuntimeFailure(env, "telegram-menu-reset-failed", SETTINGS_KEY, error);
+      }
+      await env.EMBY_ICONS.delete(COMMANDS_VERSION_KEY).catch(() => {});
+    }
+    return jsonResponse(request, {
+      ...publicSettings({ enabled, botDisabled, chatId, origin, token, webhookSecret }),
+      webhookConfigured: false,
+      webhookDeleted,
+      menuConfigured: menuReset,
+      menuReset,
+      commandsConfigured: commandsDeleted,
+      commandsDeleted,
+      warning: warnings.join(" "),
+    });
+  }
+
   if (token) {
     // Notification delivery and bot commands share the same webhook. Turning
     // notifications off must never remove the webhook or disable /start/help.
@@ -1203,7 +1266,7 @@ export async function handleAdminTelegramSettings(request, env) {
 }
 export async function notifyNewSubmission(env, submission, origin = "") {
   const settings = await readSettings(env);
-  if (!settings.enabled || !settings.token || !settings.chatId) return false;
+  if (settings.botDisabled || !settings.enabled || !settings.token || !settings.chatId) return false;
   if (!settings.webhookSecret) {
     try {
       await ensureWebhookForSettings(env, settings, origin);
@@ -1279,7 +1342,7 @@ export async function notifySubmissionResult(env, id) {
     } catch {
       return false;
     }
-    if (!settings.enabled || !settings.token) return false;
+    if (settings.botDisabled || !settings.enabled || !settings.token) return false;
 
     const row = await env.DB.prepare(
       `SELECT id, name, status, reviewer_note, telegram_user_id, result_notified_at
@@ -1980,7 +2043,10 @@ export async function handleTelegramWebhook(request, env, secretParam, waitUntil
   } catch {
     return new Response("Not found", { status: 404 });
   }
-  // The notification toggle only controls submission/review notifications.\n  // Commands and Mini App entry points must keep working after notifications are disabled.\n  if (!settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
+  // The notification toggle only controls submission/review notifications.
+  // The separate botDisabled switch is the hard stop for every Bot update.
+  if (settings.botDisabled) return new Response("Not found", { status: 404 });
+  if (!settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== settings.webhookSecret) return new Response("Not found", { status: 404 });
 
   // Bot menus are versioned in KV so a deploy that adds a command or changes

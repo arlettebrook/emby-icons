@@ -1277,6 +1277,103 @@ test("disabling notifications keeps the webhook and command menus registered", a
   }
 });
 
+test("disabling the Bot removes its webhook, commands, and menu button", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const sendCallsBefore = mock.method("sendPhoto").length;
+
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: true, botDisabled: true }),
+      }),
+      env,
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.botDisabled, true);
+    assert.equal(body.webhookDeleted, true);
+    assert.equal(body.commandsDeleted, true);
+    assert.equal(body.menuReset, true);
+    assert.deepEqual(mock.method("deleteWebhook").at(-1).payload, { drop_pending_updates: true });
+    assert.equal(mock.method("deleteMyCommands").length, 2);
+    assert.deepEqual(
+      mock.method("setChatMenuButton").at(-1).payload.menu_button,
+      { type: "default" },
+    );
+    assert.equal(mock.method("setWebhook").length, 1, "saving the disabled state must not restore the webhook");
+    assert.equal(await env.EMBY_ICONS.get("settings/telegram/commands-version"), null);
+
+    const blocked = await message(secret, env, "/start");
+    assert.equal(blocked.status, 404);
+
+    const notified = await notifyNewSubmission(
+      env,
+      { id: "disabled-bot", name: "DisabledBot", url: "https://example.com/disabled.png", note: "" },
+      "https://example.com",
+    );
+    assert.equal(notified, false);
+    assert.equal(mock.method("sendPhoto").length, sendCallsBefore);
+
+    const sync = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "POST",
+        headers: adminHeaders(),
+        body: JSON.stringify({ action: "sync" }),
+      }),
+      env,
+    );
+    const syncBody = await sync.json();
+    assert.equal(sync.status, 409);
+    assert.equal(syncBody.code, "TELEGRAM_BOT_DISABLED");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("re-enabling the Bot restores its webhook and command menus", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: true, botDisabled: true }),
+      }),
+      env,
+    );
+
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: true, botDisabled: false }),
+      }),
+      env,
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.botDisabled, false);
+    assert.equal(body.webhookConfigured, true);
+    assert.equal(body.commandsConfigured, true);
+    assert.equal(mock.method("setWebhook").length, 2);
+    assert.deepEqual(mock.method("setChatMenuButton").at(-1).payload.menu_button, { type: "commands" });
+    assert.equal(mock.method("setMyCommands").length, 4);
+
+    const update = await message(secret, env, "/start");
+    assert.equal(update.status, 200);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("a webhook updates the persistent menu button after a command version change", async () => {
   mock = installTelegramFetchMock();
   try {
