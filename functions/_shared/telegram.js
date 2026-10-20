@@ -5,12 +5,11 @@ const SETTINGS_KEY = "settings/telegram.json";
 const ANNOUNCEMENT_CHANNEL = "@MikuNaNChannel";
 const ANNOUNCEMENT_MESSAGE_ID = 8;
 const ANNOUNCEMENT_URL = "https://t.me/MikuNaNChannel/8";
-const ANNOUNCEMENT_EMBED_URL = "https://t.me/MikuNaNChannel/8?embed=1&mode=tme";
 const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
 const DEFAULT_PUBLIC_ORIGIN = "https://emby-icons.lyra.cc.cd";
 const PUBLIC_COMMANDS = [
   { command: "start", description: "快速开始" },
-  { command: "icons", description: "获取图标库与导入地址" },
+  { command: "icons", description: "获取图标库地址" },
   { command: "help", description: "查看帮助" },
   { command: "submit", description: "打开图标提交页面" },
   { command: "my", description: "打开我的提交页面" },
@@ -31,7 +30,7 @@ const CAPTION_LIMIT = 1024;
 const QUEUE_LIMIT = 50;
 const QUEUE_PAGE_SIZE = 10;
 const MAX_EDIT_NOTE_LENGTH = 1000;
-const COMMANDS_VERSION = "20261021-1";
+const COMMANDS_VERSION = "20261021-2";
 const COMMANDS_VERSION_KEY = "settings/telegram/commands-version";
 
 function responseHeaders(request) {
@@ -434,6 +433,7 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId, origin =
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
         inline_keyboard: [
+          [{ text: "🖼 获取图标", callback_data: "icons:show" }],
           [miniAppButton("🖼 提交图标", "channel8", telegramChatType(chatId), origin)],
           [miniAppButton("📋 我的提交", "my", telegramChatType(chatId), origin)],
         ],
@@ -450,7 +450,7 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId, origin =
     await sendTelegramMessage(
       token,
       chatId,
-      `提交图标：${telegramMiniAppUrl("channel8")}\n我的提交：${telegramMiniAppUrl("my")}`,
+      `获取图标：发送 /icons\n提交图标：${telegramMiniAppUrl("channel8")}\n我的提交：${telegramMiniAppUrl("my")}`,
     ).catch(() => {});
   }
 }
@@ -596,174 +596,15 @@ async function sendIconsEntry(env, settings, chatId, messageThreadId) {
   );
 }
 
-const ANNOUNCEMENT_FALLBACK_HTML = [
-  "<i><b>🖼</b></i> Emby 自用图标库",
-  "",
-  "目前「2025.7.31」已收录 2500+ Emby 图标。",
-  "",
-  "自带GitHub代理加速。",
-  "",
-  "自带清理无效图标。",
-  "",
-  '导入地址： <code>https://emby-icons.lyra.cc.cd/emby-icons.json</code>',
-  "",
-  '备用地址： <code>https://lyra.bbroot.com/emby-icons.json</code>',
-  "",
-  '<a href="http://t.me/emby_icons_bot/submit">新增图标</a>',
-  "",
-  '<a href="https://github.com/arlettebrook/emby-icons"><tg-spoiler><u>备用新增图标</u></tg-spoiler></a>',
-  "",
-  '# <i>图标来自各位大佬，如不希望收录请 </i><a href="https://t.me/MikuNaNChannel?direct"><i>联系</i></a><i> 删除。</i>',
-  "",
-  '<i><b>📢</b></i> 防失联频道： <a href="https://t.me/MikuNaNChannel">@MikuNaNChannel</a>',
-].join("\n");
-
-const ANNOUNCEMENT_TAG_ALIASES = new Map([
-  ["strong", "b"],
-  ["em", "i"],
-  ["ins", "u"],
-  ["strike", "s"],
-  ["del", "s"],
-]);
-const ANNOUNCEMENT_ALLOWED_TAGS = new Set(["b", "i", "u", "s", "code", "pre", "blockquote", "tg-spoiler"]);
-
-function decodeHtmlEntities(value) {
-  const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0" };
-  return String(value ?? "")
-    .replace(/&#x([0-9a-f]+);/gi, (match, code) => {
-      try { return String.fromCodePoint(Number.parseInt(code, 16)); } catch { return match; }
-    })
-    .replace(/&#([0-9]+);/g, (match, code) => {
-      try { return String.fromCodePoint(Number.parseInt(code, 10)); } catch { return match; }
-    })
-    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (match, name) => named[name.toLowerCase()] ?? match);
-}
-
-function escapeTelegramHtmlText(value) {
-  // Telegram's HTML parser needs text nodes escaped, while supported markup is
-  // reconstructed by sanitizeAnnouncementHtml below.
-  return decodeHtmlEntities(value)
-    .replace(/\s+/g, " ")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeHtmlAttribute(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function safeAnnouncementHref(attributes) {
-  const match = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(String(attributes || ""));
-  const raw = decodeHtmlEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    return ["http:", "https:"].includes(parsed.protocol) ? raw : "";
-  } catch {
-    return "";
-  }
-}
-
-function sanitizeAnnouncementHtml(value) {
-  const source = String(value || "");
-  if (!source || source.length > 50000) return "";
-
-  const tagPattern = /<br\s*\/?\s*>|<(\/?)\s*([a-z][a-z0-9:-]*)([^>]*)>/gi;
-  const stack = [];
-  let output = "";
-  let cursor = 0;
-  let match;
-
-  while ((match = tagPattern.exec(source))) {
-    output += escapeTelegramHtmlText(source.slice(cursor, match.index));
-    cursor = tagPattern.lastIndex;
-
-    if (/^<br/i.test(match[0])) {
-      output += "\n";
-      continue;
-    }
-
-    const closing = Boolean(match[1]);
-    let tag = String(match[2] || "").toLowerCase();
-    const attributes = match[3] || "";
-
-    if (tag === "p" || tag === "div") {
-      if (closing) output += "\n";
-      continue;
-    }
-    if (tag === "span") {
-      if (!closing && /\bclass\s*=\s*(?:"[^"]*\btg-spoiler\b[^"]*"|'[^']*\btg-spoiler\b[^']*')/i.test(attributes)) {
-        tag = "tg-spoiler";
-      } else if (closing && stack[stack.length - 1] === "tg-spoiler") {
-        tag = "tg-spoiler";
-      } else {
-        continue;
-      }
-    }
-
-    tag = ANNOUNCEMENT_TAG_ALIASES.get(tag) || tag;
-    if (!ANNOUNCEMENT_ALLOWED_TAGS.has(tag) && tag !== "a") continue;
-
-    if (closing) {
-      const openIndex = stack.lastIndexOf(tag);
-      if (openIndex === -1) continue;
-      while (stack.length > openIndex) output += `</${stack.pop()}>`;
-      continue;
-    }
-
-    if (tag === "a") {
-      const href = safeAnnouncementHref(attributes);
-      if (!href) continue;
-      output += `<a href="${escapeHtmlAttribute(href)}">`;
-    } else {
-      output += `<${tag}>`;
-    }
-    stack.push(tag);
-  }
-
-  output += escapeTelegramHtmlText(source.slice(cursor));
-  while (stack.length) output += `</${stack.pop()}>`;
-  return output
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
-}
-
-async function fetchChannelAnnouncementHtml() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000);
-  try {
-    const response = await fetch(ANNOUNCEMENT_EMBED_URL, {
-      headers: { Accept: "text/html" },
-      signal: controller.signal,
-    });
-    if (!response.ok) return ANNOUNCEMENT_FALLBACK_HTML;
-    const body = await response.text();
-    const match = /<div\b[^>]*\bclass\s*=\s*(?:"[^"]*\btgme_widget_message_text\b[^"]*"|'[^']*\btgme_widget_message_text\b[^']*')[^>]*>([\s\S]*?)<\/div>/i.exec(body);
-    return sanitizeAnnouncementHtml(match?.[1]) || ANNOUNCEMENT_FALLBACK_HTML;
-  } catch {
-    return ANNOUNCEMENT_FALLBACK_HTML;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// /help combines the formatted help card with the live channel post. The post is
-// fetched from Telegram's public embed page so links, code, italics and spoilers
-// keep their original formatting without relying on forwarding permissions.
+// /help is a standalone reference card. The channel post is available through
+// the "获取图标" button (or /icons) and is not duplicated inside the help card.
 async function sendHelpEntry(env, settings, chatId, messageThreadId) {
   const chatType = telegramChatType(chatId);
-  const announcement = await fetchChannelAnnouncementHtml();
   const text = [
     "📖 <b>Emby 图标库帮助</b>",
     "",
     "<b>提交与查询</b>",
-    "• /icons — 获取图标库与导入地址",
+    "• /icons — 获取图标库地址",
     "• /submit — 打开图标提交页面",
     "• /my — 打开我的提交页面",
     "",
@@ -778,17 +619,12 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
     "• 为什么被拒绝：常见原因是图片模糊、重复或链接无法访问；拒绝原因会私聊发送",
     "• 如何修改或撤回：打开 /my，选择对应记录；待审核记录可直接修改或撤回",
     "• 为什么没收到通知：请先通过 /start 与机器人建立私聊，并确认未关闭机器人通知",
-    "",
-    "━━━━━━━━━━━━━━",
-    "📌 <b>频道公告</b>",
-    "",
-    announcement,
   ].join("\n");
   const keyboard = {
     inline_keyboard: [
+      [{ text: "🖼 获取图标", callback_data: "icons:show" }],
       [miniAppButton("🖼 提交图标", "channel8", chatType, settings.origin)],
       [miniAppButton("📋 我的提交", "my", chatType, settings.origin)],
-      [{ text: "📣 查看公告", url: ANNOUNCEMENT_URL }],
     ],
   };
   try {
@@ -812,9 +648,9 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
       chatId,
       [
         "Emby 图标库帮助",
-        `提交图标：${telegramMiniAppUrl("command")}`,
+        "获取图标：发送 /icons",
+        `提交图标：${telegramMiniAppUrl("channel8")}`,
         `我的提交：${telegramMiniAppUrl("my")}`,
-        `公告：${ANNOUNCEMENT_URL}`,
       ].join("\n"),
     ).catch(() => {});
   }
@@ -1882,13 +1718,16 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   const chatId = String(callback.message?.chat?.id || "");
   const chatType = callback.message?.chat?.type;
   const userId = String(callback.from?.id || "");
-  if (String(callback.data || "") === "announcement:show") {
+  const callbackData = String(callback.data || "");
+  // Both callback names are supported so buttons already sent as "查看公告"
+  // now return the same channel content as /icons.
+  if (callbackData === "icons:show" || callbackData === "announcement:show") {
     if (chatType !== "private" || !chatId || !userId || callback.from?.is_bot) {
       await answerCallback(settings.token, callback.id, "此聊天未授权").catch(() => {});
       return;
     }
-    await answerCallback(settings.token, callback.id, "正在发送公告…").catch(() => {});
-    await sendAnnouncement(env, settings, chatId, undefined);
+    await answerCallback(settings.token, callback.id, "正在获取图标…").catch(() => {});
+    await sendIconsEntry(env, settings, chatId, callback.message?.message_thread_id);
     return;
   }
   if (chatType !== "private" || chatId !== settings.chatId || !userId || callback.from?.is_bot) {
