@@ -433,9 +433,9 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId, origin =
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
         inline_keyboard: [
-          [{ text: "🖼 获取图标", callback_data: "icons:show" }],
           [miniAppButton("🖼 提交图标", "channel8", telegramChatType(chatId), origin)],
           [miniAppButton("📋 我的提交", "my", telegramChatType(chatId), origin)],
+          [{ text: "🖼 获取图标", callback_data: "icons:show" }],
         ],
       },
     });
@@ -622,9 +622,9 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
   ].join("\n");
   const keyboard = {
     inline_keyboard: [
-      [{ text: "🖼 获取图标", callback_data: "icons:show" }],
       [miniAppButton("🖼 提交图标", "channel8", chatType, settings.origin)],
       [miniAppButton("📋 我的提交", "my", chatType, settings.origin)],
+      [{ text: "🖼 获取图标", callback_data: "icons:show" }],
     ],
   };
   try {

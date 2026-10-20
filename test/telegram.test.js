@@ -875,14 +875,14 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.equal(entry.payload.chat_id, "9001");
     assert.match(entry.payload.text, /审核通过后会收录到公开图标库/);
     const buttons = entry.payload.reply_markup.inline_keyboard;
-    assert.deepEqual(buttons[0][0], { text: "🖼 获取图标", callback_data: "icons:show" });
-    assert.equal(buttons[1][0].text, "🖼 提交图标");
+    assert.equal(buttons[0][0].text, "🖼 提交图标");
     assert.equal(
-      buttons[1][0].web_app.url,
+      buttons[0][0].web_app.url,
       "https://example.com/submit?startapp=channel8",
     );
-    assert.equal(buttons[1][0].url, undefined);
-    assert.equal(buttons[2][0].text, "📋 我的提交");
+    assert.equal(buttons[0][0].url, undefined);
+    assert.equal(buttons[1][0].text, "📋 我的提交");
+    assert.deepEqual(buttons[2][0], { text: "🖼 获取图标", callback_data: "icons:show" });
   } finally {
     mock.restore();
   }
@@ -962,9 +962,9 @@ test("/start offers icon retrieval and /help omits channel announcements", async
         && !text.includes("emby-icons.json");
     }));
     const helpButtons = helps[0].payload.reply_markup.inline_keyboard;
-    assert.deepEqual(helpButtons[0][0], { text: "🖼 获取图标", callback_data: "icons:show" });
-    assert.equal(helpButtons[1][0].text, "🖼 提交图标");
-    assert.equal(helpButtons[2][0].text, "📋 我的提交");
+    assert.equal(helpButtons[0][0].text, "🖼 提交图标");
+    assert.equal(helpButtons[1][0].text, "📋 我的提交");
+    assert.deepEqual(helpButtons[2][0], { text: "🖼 获取图标", callback_data: "icons:show" });
 
     const entries = mock.method("sendMessage").filter((call) => (
       /需要提交图标/.test(String(call.payload.text || ""))
@@ -972,10 +972,10 @@ test("/start offers icon retrieval and /help omits channel announcements", async
     assert.equal(entries.length, 2, "each /start should offer the follow-up entry buttons");
     assert.ok(entries.every((call) => {
       const buttons = call.payload.reply_markup.inline_keyboard;
-      return buttons[0][0].text === "🖼 获取图标"
-        && buttons[0][0].callback_data === "icons:show"
-        && buttons[1][0].text === "🖼 提交图标"
-        && buttons[2][0].text === "📋 我的提交";
+      return buttons[0][0].text === "🖼 提交图标"
+        && buttons[1][0].text === "📋 我的提交"
+        && buttons[2][0].text === "🖼 获取图标"
+        && buttons[2][0].callback_data === "icons:show";
     }));
     assert.equal(mock.method("announcementEmbed").length, 0, "help must not load the channel post");
 
@@ -1010,9 +1010,9 @@ test("/help sends a standalone formatted help card to the admin", async () => {
     assert.match(text, /<b>常见问题<\/b>/);
     assert.doesNotMatch(text, /频道公告|Emby 自用图标库|emby-icons\.json/);
     const buttons = help.payload.reply_markup.inline_keyboard;
-    assert.deepEqual(buttons[0][0], { text: "🖼 获取图标", callback_data: "icons:show" });
-    assert.equal(buttons[1][0].text, "🖼 提交图标");
-    assert.equal(buttons[2][0].text, "📋 我的提交");
+    assert.equal(buttons[0][0].text, "🖼 提交图标");
+    assert.equal(buttons[1][0].text, "📋 我的提交");
+    assert.deepEqual(buttons[2][0], { text: "🖼 获取图标", callback_data: "icons:show" });
     assert.equal(mock.method("forwardMessage").length, 0, "help must not forward the channel post");
     assert.equal(mock.method("announcementEmbed").length, 0);
   } finally {
