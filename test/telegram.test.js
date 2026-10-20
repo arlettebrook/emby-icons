@@ -859,6 +859,34 @@ test("/start forwards the channel announcement to any user", async () => {
   }
 });
 
+test("repeated /start and /help always forward the full announcement", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const options = { userId: "9010", chatId: "9010" };
+
+    await message(secret, env, "/start", 21, options);
+    await message(secret, env, "/start", 22, options);
+    await message(secret, env, "/help", 23, options);
+    await message(secret, env, "/help", 24, options);
+
+    const forwards = mock.method("forwardMessage");
+    assert.equal(forwards.length, 4, "every command should forward a fresh announcement");
+    assert.ok(forwards.every((call) => (
+      call.payload.chat_id === "9010"
+      && call.payload.from_chat_id === "@MikuNaNChannel"
+      && call.payload.message_id === 8
+    )));
+    const replyText = mock.method("sendMessage")
+      .map((call) => String(call.payload.text || ""))
+      .join("\n");
+    assert.doesNotMatch(replyText, /帮助内容已发送。|重新查看公告/);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("/help also reaches the configured admin chat", async () => {
   mock = installTelegramFetchMock();
   try {

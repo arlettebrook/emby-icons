@@ -31,8 +31,6 @@ const QUEUE_PAGE_SIZE = 10;
 const MAX_EDIT_NOTE_LENGTH = 1000;
 const COMMANDS_VERSION = "20261020-2";
 const COMMANDS_VERSION_KEY = "settings/telegram/commands-version";
-const ANNOUNCEMENT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-const ANNOUNCEMENT_COOLDOWN_PREFIX = "settings/telegram/announcement/";
 
 function responseHeaders(request) {
   return {
@@ -504,88 +502,11 @@ async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
   }
 }
 
-function announcementCooldownKey(userId) {
-  return ANNOUNCEMENT_COOLDOWN_PREFIX + encodeURIComponent(String(userId || ""));
-}
-
-async function readAnnouncementShownAt(env, userId) {
-  if (!env.EMBY_ICONS || !userId) return 0;
-  try {
-    const raw = await env.EMBY_ICONS.get(announcementCooldownKey(userId));
-    if (!raw) return 0;
-    const shownAt = Number(JSON.parse(raw)?.shownAt);
-    return Number.isFinite(shownAt) && shownAt > 0 ? shownAt : 0;
-  } catch {
-    return 0;
-  }
-}
-
-async function rememberAnnouncementShown(env, userId) {
-  if (!env.EMBY_ICONS || !userId) return;
-  try {
-    await env.EMBY_ICONS.put(announcementCooldownKey(userId), JSON.stringify({ shownAt: Date.now() }));
-  } catch {
-    // A failed cooldown marker only means the next command repeats the full
-    // announcement; it must never block the reply itself.
-  }
-}
-
-function announcementShortKeyboard(chatId, origin = DEFAULT_PUBLIC_ORIGIN) {
-  const chatType = telegramChatType(chatId);
-  const buttons = [
-    [
-      { text: "📣 查看公告", url: ANNOUNCEMENT_URL },
-      miniAppButton("🖼 提交图标", "channel8", chatType, origin),
-    ],
-    [miniAppButton("📋 我的提交", "my", chatType, origin)],
-  ];
-  if (chatType === "private") {
-    buttons.push([{ text: "🔁 重新查看公告", callback_data: "announcement:show" }]);
-  }
-  return { inline_keyboard: buttons };
-}
-
-async function sendAnnouncementShortcut(env, settings, chatId, messageThreadId, command) {
-  const text = command === "help"
-    ? `帮助内容已发送。完整公告：${ANNOUNCEMENT_URL}\n\n需要重新查看公告时，可以点击下方按钮。`
-    : `公告：${ANNOUNCEMENT_URL}\n\n需要提交图标或查看审核状态，可以直接使用下方按钮。`;
-  try {
-    await telegramApi(settings.token, "sendMessage", {
-      chat_id: chatId,
-      text,
-      disable_web_page_preview: true,
-      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-      reply_markup: announcementShortKeyboard(chatId, settings.origin),
-    });
-  } catch (error) {
-    await writeAuditLog(env, {
-      actorId: "telegram",
-      action: "telegram-announcement-shortcut-failed",
-      targetId: String(chatId),
-      details: { error: String(error?.message || "Announcement shortcut failed").slice(0, 240) },
-    }).catch(() => {});
-    await sendTelegramMessage(
-      settings.token,
-      chatId,
-      `公告：${ANNOUNCEMENT_URL}\n提交图标：${telegramMiniAppUrl("channel8")}`,
-    ).catch(() => {});
-  }
-}
-
 // /start and /help are answered for every user, not only the configured review
-// chat. Forward the channel announcement so new users can find the icon
-// library; fall back to copying when the channel forbids forwarding, and to a
-// plain link when the bot cannot read the post at all. Repeat commands inside
-// the cooldown window get a compact link plus buttons instead of another copy.
-async function sendAnnouncement(env, settings, chatId, messageThreadId, { force = false, userId = "", command = "start" } = {}) {
-  if (!force && userId) {
-    const shownAt = await readAnnouncementShownAt(env, userId);
-    if (shownAt && Date.now() - shownAt < ANNOUNCEMENT_COOLDOWN_MS) {
-      await sendAnnouncementShortcut(env, settings, chatId, messageThreadId, command);
-      return;
-    }
-  }
-
+// chat. Always forward the channel announcement so each command gives a complete
+// reply; fall back to copying when the channel forbids forwarding, and to a
+// plain link when the bot cannot read the post at all.
+async function sendAnnouncement(env, settings, chatId, messageThreadId) {
   const payload = {
     chat_id: chatId,
     from_chat_id: ANNOUNCEMENT_CHANNEL,
@@ -610,7 +531,6 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId, { force 
     }
   }
   if (delivered) {
-    await rememberAnnouncementShown(env, userId);
     await sendSubmissionEntry(env, settings.token, chatId, messageThreadId, settings.origin);
     return;
   }
@@ -1762,7 +1682,7 @@ async function handleCallbackUpdate(request, env, settings, callback) {
       return;
     }
     await answerCallback(settings.token, callback.id, "正在发送公告…").catch(() => {});
-    await sendAnnouncement(env, settings, chatId, undefined, { force: true, userId });
+    await sendAnnouncement(env, settings, chatId, undefined);
     return;
   }
   if (chatType !== "private" || chatId !== settings.chatId || !userId || callback.from?.is_bot) {
@@ -1895,12 +1815,12 @@ async function handleMessageUpdate(env, settings, message) {
     return;
   }
   if (/^\/start(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
-    await sendAnnouncement(env, settings, chatId, message.message_thread_id, { userId });
+    await sendAnnouncement(env, settings, chatId, message.message_thread_id);
     return;
   }
   if (/^\/help(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
     await sendHelpEntry(env, settings, chatId, message.message_thread_id);
-    await sendAnnouncement(env, settings, chatId, message.message_thread_id, { userId, command: "help" });
+    await sendAnnouncement(env, settings, chatId, message.message_thread_id);
     return;
   }
   if (chatId !== settings.chatId) return;
