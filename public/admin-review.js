@@ -11,6 +11,11 @@ const telegramTokenNote = document.querySelector("#telegram-token-note");
 const telegramStatus = document.querySelector("#telegram-settings-status");
 const telegramSaveButton = document.querySelector("#telegram-save-button");
 const filter = document.querySelector("#moderation-filter");
+const searchInput = document.querySelector("#moderation-search");
+const reviewerFilter = document.querySelector("#moderation-reviewer");
+const loadMoreButton = document.querySelector("#moderation-more");
+const summary = document.querySelector("#moderation-summary");
+const emptyState = document.querySelector("#moderation-empty");
 
 function adminHeaders() {
   const token = sessionStorage.getItem("emby-icons-admin-token") || "";
@@ -235,25 +240,87 @@ async function decide(id, action, actions, { note = "", name = "" } = {}) {
   }
 }
 
-async function loadQueue() {
+const PAGE_SIZE = 50;
+let nextCursor = null;
+let loadedCount = 0;
+let searchTimer = 0;
+
+function currentFilters() {
+  return {
+    status: filter?.value || "pending",
+    q: String(searchInput?.value || "").trim(),
+    reviewerId: reviewerFilter?.value || "",
+  };
+}
+
+function updateSummary(stats = {}) {
+  if (!summary) return;
+  summary.textContent = `待审核 ${Number(stats.pending || 0)} · 发布中 ${Number(stats.approving || 0)} · 总计 ${Number(stats.total || 0)}`;
+}
+
+function updateReviewerOptions(stats = {}) {
+  if (!reviewerFilter) return;
+  const current = reviewerFilter.value;
+  const reviewers = Object.keys(stats.byReviewer || {}).sort((a, b) => a.localeCompare(b));
+  const options = [new Option("全部", "")];
+  for (const id of reviewers) {
+    options.push(new Option(id === "unreviewed" ? "未审核" : id, id));
+  }
+  reviewerFilter.replaceChildren(...options);
+  if (current && reviewers.includes(current)) reviewerFilter.value = current;
+}
+
+async function loadQueue({ append = false } = {}) {
   refreshButton.disabled = true;
-  const statusFilter = filter?.value || "pending";
-  setStatus(`正在加载${statusLabel(statusFilter)}提交…`);
+  if (loadMoreButton) loadMoreButton.disabled = true;
+  const filters = currentFilters();
+  if (!append) nextCursor = null;
+  setStatus(append ? "正在加载更多…" : `正在加载${statusLabel(filters.status)}提交…`);
+  const params = new URLSearchParams({ status: filters.status, limit: String(PAGE_SIZE) });
+  if (filters.q) params.set("q", filters.q);
+  if (filters.reviewerId) params.set("reviewerId", filters.reviewerId);
+  if (append && nextCursor) params.set("cursor", nextCursor);
   try {
-    const response = await fetch(`/api/admin/submissions?status=${encodeURIComponent(statusFilter)}`, { headers: adminHeaders(), cache: "no-store" });
+    const response = await fetch(`/api/admin/submissions?${params}`, { headers: adminHeaders(), cache: "no-store" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `加载失败（${response.status}）`);
-    list.replaceChildren(...(body.submissions || []).map(makeItem));
-    setStatus(`当前有 ${body.submissions?.length || 0} 条${statusLabel(statusFilter)}提交。`);
+    const items = Array.isArray(body.submissions) ? body.submissions : [];
+    const nodes = items.map(makeItem);
+    if (append) {
+      list.append(...nodes);
+      loadedCount += items.length;
+    } else {
+      list.replaceChildren(...nodes);
+      loadedCount = items.length;
+    }
+    nextCursor = body.nextCursor || null;
+    if (loadMoreButton) loadMoreButton.hidden = !nextCursor;
+    if (emptyState) emptyState.hidden = loadedCount > 0;
+    updateSummary(body.stats);
+    updateReviewerOptions(body.stats);
+    setStatus(loadedCount === 0
+      ? `没有符合条件的${statusLabel(filters.status)}提交。`
+      : `已显示 ${loadedCount} 条${statusLabel(filters.status)}提交。`);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
     refreshButton.disabled = false;
+    if (loadMoreButton) loadMoreButton.disabled = false;
   }
 }
 
-refreshButton?.addEventListener("click", loadQueue);
-filter?.addEventListener("change", loadQueue);
+function reloadQueue() {
+  return loadQueue();
+}
+
+refreshButton?.addEventListener("click", reloadQueue);
+filter?.addEventListener("change", reloadQueue);
+reviewerFilter?.addEventListener("change", reloadQueue);
+loadMoreButton?.addEventListener("click", () => loadQueue({ append: true }));
+searchInput?.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(reloadQueue, 350);
+});
 openButton?.addEventListener("click", () => dialog?.showModal());
 closeButton?.addEventListener("click", () => dialog?.close());
 dialog?.addEventListener("click", (event) => {

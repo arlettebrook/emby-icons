@@ -1305,6 +1305,12 @@ elements.importForm.addEventListener("submit", (event) => {
   importDocument(event);
 });
 
+document.addEventListener("emby-icons:document-restored", (event) => {
+  const versionId = event.detail?.versionId;
+  showToast(versionId ? `已回滚到版本 #${versionId}` : "文档已回滚");
+  loadDocument({ confirmDiscard: false });
+});
+
 window.addEventListener("beforeunload", (event) => {
   if (!dirty) return;
   event.preventDefault();

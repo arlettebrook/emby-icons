@@ -1,3 +1,15 @@
+import {
+  loadReferences,
+  removeReference,
+  removeReferences,
+  saveReferences,
+} from "./submission-storage.js";
+import {
+  attachImagePreview,
+  imageUrlIssue,
+  renderImagePreview,
+} from "./image-preview.js";
+
 const list = document.querySelector("#submission-list");
 const empty = document.querySelector("#submission-empty");
 const detail = document.querySelector("#submission-detail");
@@ -7,6 +19,9 @@ const countValue = document.querySelector("#submission-count-value");
 const editForm = document.querySelector("#edit-form");
 const nameInput = document.querySelector("#edit-name");
 const urlInput = document.querySelector("#edit-url");
+const detailImagePreview = document.querySelector("#detail-image-preview");
+const editImagePreview = document.querySelector("#edit-image-preview");
+const editImagePreviewControl = attachImagePreview(urlInput, editImagePreview);
 const noteInput = document.querySelector("#edit-note");
 const saveButton = document.querySelector("#save-button");
 const cancelEdit = document.querySelector("#cancel-edit");
@@ -37,6 +52,7 @@ let currentSubmission = null;
 let editMode = false;
 // 详情块的渲染签名：同一份数据不重复重建（URL 可能是几十 KB 的 data: 串）。
 let detailSignature = "";
+let detailPreviewUrl = null;
 const TURNSTILE_SITE_KEY = String(window.SUBMISSION_SITE_KEY || "").trim();
 let turnstileToken = "";
 let turnstileWidgetId = null;
@@ -59,67 +75,11 @@ function statusMeta(status) {
   return STATUS_META[status] || { label: status || "未知", className: "" };
 }
 
-function tokenStorageKey(id) {
-  return "emby-submission-token:" + id;
-}
-
-function readSavedSubmissions() {
-  try {
-    const values = JSON.parse(localStorage.getItem("emby-submissions") || "[]");
-    const saved = Array.isArray(values) ? values.filter((item) => item?.id && item?.token) : [];
-    const known = new Set(saved.map((item) => item.id));
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index) || "";
-      if (!key.startsWith("emby-submission-token:")) continue;
-      const id = key.slice("emby-submission-token:".length);
-      const token = localStorage.getItem(key) || "";
-      if (id && token && !known.has(id)) saved.push({ id, token });
-    }
-    return saved;
-  } catch {
-    return [];
-  }
-}
-
-// 把当前列表的引用整体写回本地。以前是每加载一条记录就同步写一次 localStorage，
-// 30 条记录会在主线程上写 30 次，首屏明显被拖慢；现在每次加载最多写一次，
-// 内容没变化时直接跳过。
 function submissionHeaders(token, extra = {}) {
   const headers = { ...extra };
   if (token) headers["X-Submission-Token"] = token;
   if (telegramInitData) headers["X-Telegram-Init-Data"] = telegramInitData;
   return headers;
-}
-
-function persistReferences(items) {
-  const wanted = new Map();
-  for (const item of items.slice(0, 30)) {
-    // 列表项是 { submission, token }，本地引用是 { id, token }，两种形状都认。
-    const id = (item.submission && item.submission.id) || item.id;
-    if (!id || !item.token) continue;
-    wanted.set(id, item.token);
-  }
-  // 一条有效引用都提取不到时什么都不写：宁可保持原状，也不能把已有记录覆盖掉。
-  if (!wanted.size) return;
-  const current = readSavedSubmissions();
-  const unchanged = current.length === wanted.size && current.every((item) => wanted.get(item.id) === item.token);
-  if (unchanged) return;
-  try {
-    localStorage.setItem("emby-submissions", JSON.stringify(Array.from(wanted, ([id, token]) => ({ id, token }))));
-    wanted.forEach((token, id) => localStorage.setItem(tokenStorageKey(id), token));
-  } catch {
-    // 浏览器存储不可用时忽略；刷新后会以服务端结果为准。
-  }
-}
-
-// 删除本地记录：列表条目和单独的 token 键都要清掉，否则下次加载会出现幽灵条目。
-function removeSavedSubmission(id) {
-  try {
-    localStorage.setItem("emby-submissions", JSON.stringify(readSavedSubmissions().filter((item) => item.id !== id)));
-    localStorage.removeItem(tokenStorageKey(id));
-  } catch {
-    // 浏览器存储不可用时忽略；刷新后会以服务端结果为准。
-  }
 }
 
 function applyBadge(element, status) {
@@ -436,6 +396,15 @@ function renderSubmissionInfo(submission) {
   if (signature !== detailSignature) {
     detailSignature = signature;
     renderMeta(submission, { editing: formVisible });
+  }
+  if (formVisible) {
+    detailPreviewUrl = "";
+    detailImagePreview.hidden = true;
+    detailImagePreview.replaceChildren();
+    editImagePreviewControl.refresh();
+  } else if (submission.url !== detailPreviewUrl) {
+    detailPreviewUrl = submission.url;
+    renderImagePreview(detailImagePreview, submission.url);
   }
   editForm.hidden = !formVisible;
   detailEyebrow.textContent = formVisible ? (editable ? "编辑提交" : "重新提交审核") : "记录详情";
@@ -904,13 +873,13 @@ async function loadTelegramSubmissions() {
 }
 
 async function loadAll() {
-  const references = readSavedSubmissions();
+  const references = await loadReferences();
   const [loaded, telegram] = await Promise.all([
     Promise.all(references.map(loadOne)),
     loadTelegramSubmissions(),
   ]);
   // 服务端已经不存在的记录直接从本地清掉，避免列表里留下点不开的幽灵条目。
-  loaded.filter((item) => item.missing).forEach((item) => removeSavedSubmission(item.id));
+  await removeReferences(loaded.filter((item) => item.missing).map((item) => item.id));
 
   // Local records keep their access token. Telegram-only records rely on the
   // signed Mini App identity, so they deliberately carry an empty token.
@@ -926,8 +895,8 @@ async function loadAll() {
   knownReferences = valid.map((item) => ({ id: item.submission.id, token: item.token }));
   currentItems = valid;
   renderList(valid);
-  // 本地引用一次性写回，避免每条记录都同步写一次 localStorage。
-  persistReferences(valid.map((item) => ({ id: item.submission.id, token: item.token })));
+  // 本地引用一次性写回，并镜像到 Telegram CloudStorage；空 token 的 Telegram-only 记录会被忽略。
+  await saveReferences(valid.map((item) => ({ id: item.submission.id, token: item.token })));
   // 保存/撤回/重新提交后仍然停留在同一条记录上，只有它消失时才回退到首条。
   const selected =
     valid.find((item) => item.submission.id === currentId) ||
@@ -996,6 +965,12 @@ async function runAction(button, busyLabel, action, finalLabel) {
 
 async function saveSubmission(event) {
   event.preventDefault();
+  const urlIssue = imageUrlIssue(urlInput.value);
+  if (urlIssue) {
+    showResult(urlIssue, true, detailResult);
+    urlInput.focus();
+    return;
+  }
   const resubmitting = currentStatus !== "pending";
   const payload = {
     name: nameInput.value,
@@ -1099,7 +1074,7 @@ async function deleteSubmission(id, token, button) {
         throw new Error(body.error || "删除失败（" + response.status + "）");
       }
       const wasSelected = id === currentId;
-      removeSavedSubmission(id);
+      await removeReference(id);
       if (wasSelected) resetDetailPanel();
       showToast("提交记录已删除。");
       // 只从本地列表里摘掉这一条，其它卡片和缩略图都不重建。
@@ -1133,7 +1108,7 @@ async function clearAllSubmissions() {
         });
         // 记录本来就不存在（404）也算清除成功。
         if (!response.ok && response.status !== 404) throw new Error("删除失败（" + response.status + "）");
-        removeSavedSubmission(reference.id);
+        await removeReference(reference.id);
         removed += 1;
       } catch {
         failed += 1;

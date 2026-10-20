@@ -1,3 +1,6 @@
+import { addReference } from "./submission-storage.js";
+import { attachImagePreview, imageUrlIssue } from "./image-preview.js";
+
 function readMiniAppStartParam() {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -35,6 +38,9 @@ const nameInput = document.querySelector("#name");
 const nameHint = document.querySelector("#name-hint");
 const nameExample = document.querySelector("#name-example");
 const miniAppSourceHint = document.querySelector("#mini-app-source");
+const urlInput = document.querySelector("#url");
+const imagePreview = document.querySelector("#image-preview");
+const imagePreviewControl = attachImagePreview(urlInput, imagePreview);
 let turnstileToken = "";
 let turnstileWidgetId = null;
 let telegramInitData = String(window.Telegram?.WebApp?.initData || "").trim();
@@ -284,6 +290,13 @@ if (nameInput && nameHint) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const currentUrl = String(urlInput?.value || "").trim();
+  const urlIssue = imageUrlIssue(currentUrl);
+  if (urlIssue) {
+    showResult(urlIssue, true);
+    urlInput?.focus();
+    return;
+  }
   const currentName = nameInput.value.trim();
   if (!currentName) {
     showResult("请先填写图标名称。", true);
@@ -313,6 +326,7 @@ form.addEventListener("submit", async (event) => {
         name: document.querySelector("#name").value,
         url: document.querySelector("#url").value,
         note: document.querySelector("#note").value,
+        startapp: miniAppStartParam,
       }),
     });
     const body = await response.json().catch(() => ({}));
@@ -328,18 +342,10 @@ form.addEventListener("submit", async (event) => {
       }
       throw new Error(body.error || `提交失败（${response.status}）`);
     }
-    localStorage.setItem(`emby-submission-token:${body.submission.id}`, body.accessToken);
-    const savedSubmissions = (() => {
-      try {
-        const values = JSON.parse(localStorage.getItem("emby-submissions") || "[]");
-        return Array.isArray(values) ? values : [];
-      } catch {
-        return [];
-      }
-    })().filter((item) => item?.id !== body.submission.id);
-    savedSubmissions.unshift({ id: body.submission.id, token: body.accessToken });
-    localStorage.setItem("emby-submissions", JSON.stringify(savedSubmissions.slice(0, 30)));
+    // 本地立即写入，随后异步镜像到 Telegram CloudStorage；换设备或清理缓存后仍可找回。
+    await addReference(body.submission.id, body.accessToken);
     form.reset();
+    imagePreviewControl.refresh();
     clearNameHint();
     showSubmissionSuccess(body.submission, body.accessToken, body.telegramBound === true);
   } catch (error) {

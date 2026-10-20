@@ -18,10 +18,11 @@ async function loadAdminApp() {
   loginView.hidden = true;
   app.hidden = false;
   await import("/admin-shell.js");
-  await import("/admin-review.js?v=20261007-ui22");
+  await import("/admin-review.js?v=20261020-ui35");
   await import("/admin-proxy.js?v=20260729-ui1");
-  await import("/app.js?v=20261017-ui33");
+  await import("/app.js?v=20261020-ui35");
   await import("/admin-validity.js?v=20261008-ui24");
+  await import("/admin-versions.js?v=20261020-ui35");
 }
 
 async function hasSession() {

@@ -32,6 +32,10 @@ const CAPTION_LIMIT = 1024;
 const QUEUE_LIMIT = 50;
 const QUEUE_PAGE_SIZE = 10;
 const MAX_EDIT_NOTE_LENGTH = 1000;
+const COMMANDS_VERSION = "20261020-1";
+const COMMANDS_VERSION_KEY = "settings/telegram/commands-version";
+const ANNOUNCEMENT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+const ANNOUNCEMENT_COOLDOWN_PREFIX = "settings/telegram/announcement/";
 
 function responseHeaders(request) {
   return {
@@ -285,6 +289,16 @@ function commandChatId(chatId) {
   return /^-?\d+$/.test(value) && Number.isSafeInteger(numeric) ? numeric : value;
 }
 
+// Telegram only accepts web_app buttons in private chats. Groups and channels
+// keep the plain URL button so the same helper is safe everywhere.
+function miniAppButton(text, url, chatType = "private") {
+  return chatType === "private" ? { text, web_app: { url } } : { text, url };
+}
+
+function telegramChatType(chatId) {
+  return isPrivateChatId(chatId) ? "private" : "group";
+}
+
 async function setTelegramCommands(token, chatId) {
   await telegramApi(token, "setMyCommands", { commands: PUBLIC_COMMANDS });
   if (!chatId) return;
@@ -292,6 +306,38 @@ async function setTelegramCommands(token, chatId) {
     commands: [...PUBLIC_COMMANDS, ...REVIEW_COMMANDS],
     scope: { type: "chat", chat_id: commandChatId(chatId) },
   });
+}
+
+async function rememberCommandsVersion(env) {
+  if (!env.EMBY_ICONS) return;
+  await env.EMBY_ICONS.put(COMMANDS_VERSION_KEY, COMMANDS_VERSION);
+}
+
+async function syncTelegramCommandsIfNeeded(env, settings, waitUntil) {
+  if (!env.EMBY_ICONS || !settings?.token) return false;
+  let stored = "";
+  try {
+    stored = String(await env.EMBY_ICONS.get(COMMANDS_VERSION_KEY) || "");
+  } catch {
+    return false;
+  }
+  if (stored === COMMANDS_VERSION) return false;
+  const task = (async () => {
+    try {
+      await setTelegramCommands(settings.token, settings.chatId);
+      await rememberCommandsVersion(env);
+    } catch (error) {
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "telegram-commands-sync-failed",
+        targetId: COMMANDS_VERSION_KEY,
+        details: { error: String(error?.message || "Command menu sync failed").slice(0, 240) },
+      }).catch(() => {});
+    }
+  })();
+  if (typeof waitUntil === "function") waitUntil(task);
+  else await task;
+  return true;
 }
 
 async function resetTelegramCommands(token, chatId) {
@@ -339,8 +385,8 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: {
         inline_keyboard: [
-          [{ text: "🖼 提交图标", url: SUBMIT_ENTRY_URL }],
-          [{ text: "📋 我的提交", url: MY_SUBMISSIONS_URL }],
+          [miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, telegramChatType(chatId))],
+          [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, telegramChatType(chatId))],
         ],
       },
     });
@@ -356,10 +402,11 @@ async function sendSubmissionEntry(env, token, chatId, messageThreadId) {
 }
 
 async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
+  const chatType = telegramChatType(chatId);
   const keyboard = {
     inline_keyboard: [
-      [{ text: "🖼 打开图标提交", url: SUBMIT_COMMAND_URL }],
-      [{ text: "📋 查看我的提交", url: MY_SUBMISSIONS_URL }],
+      [miniAppButton("🖼 打开图标提交", SUBMIT_COMMAND_URL, chatType)],
+      [miniAppButton("📋 查看我的提交", MY_SUBMISSIONS_URL, chatType)],
     ],
   };
   try {
@@ -382,7 +429,7 @@ async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
 
 async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
   const keyboard = {
-    inline_keyboard: [[{ text: "📋 查看我的提交", url: MY_SUBMISSIONS_URL }]],
+    inline_keyboard: [[miniAppButton("📋 查看我的提交", MY_SUBMISSIONS_URL, telegramChatType(chatId))]],
   };
   try {
     await telegramApi(settings.token, "sendMessage", {
@@ -402,11 +449,83 @@ async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
   }
 }
 
+function announcementCooldownKey(userId) {
+  return ANNOUNCEMENT_COOLDOWN_PREFIX + encodeURIComponent(String(userId || ""));
+}
+
+async function readAnnouncementShownAt(env, userId) {
+  if (!env.EMBY_ICONS || !userId) return 0;
+  try {
+    const raw = await env.EMBY_ICONS.get(announcementCooldownKey(userId));
+    if (!raw) return 0;
+    const shownAt = Number(JSON.parse(raw)?.shownAt);
+    return Number.isFinite(shownAt) && shownAt > 0 ? shownAt : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function rememberAnnouncementShown(env, userId) {
+  if (!env.EMBY_ICONS || !userId) return;
+  try {
+    await env.EMBY_ICONS.put(announcementCooldownKey(userId), JSON.stringify({ shownAt: Date.now() }));
+  } catch {
+    // A failed cooldown marker only means the next command repeats the full
+    // announcement; it must never block the reply itself.
+  }
+}
+
+function announcementShortKeyboard(chatId) {
+  const chatType = telegramChatType(chatId);
+  const buttons = [
+    [
+      { text: "📣 查看公告", url: ANNOUNCEMENT_URL },
+      miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, chatType),
+    ],
+    [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, chatType)],
+  ];
+  if (chatType === "private") {
+    buttons.push([{ text: "🔁 重新查看公告", callback_data: "announcement:show" }]);
+  }
+  return { inline_keyboard: buttons };
+}
+
+async function sendAnnouncementShortcut(env, settings, chatId, messageThreadId, command) {
+  const text = command === "help"
+    ? `帮助内容已发送。完整公告：${ANNOUNCEMENT_URL}\n\n需要重新查看公告时，可以点击下方按钮。`
+    : `公告：${ANNOUNCEMENT_URL}\n\n需要提交图标或查看审核状态，可以直接使用下方按钮。`;
+  try {
+    await telegramApi(settings.token, "sendMessage", {
+      chat_id: chatId,
+      text,
+      disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      reply_markup: announcementShortKeyboard(chatId),
+    });
+  } catch (error) {
+    await writeAuditLog(env, {
+      actorId: "telegram",
+      action: "telegram-announcement-shortcut-failed",
+      targetId: String(chatId),
+      details: { error: String(error?.message || "Announcement shortcut failed").slice(0, 240) },
+    }).catch(() => {});
+  }
+}
+
 // /start and /help are answered for every user, not only the configured review
 // chat. Forward the channel announcement so new users can find the icon
 // library; fall back to copying when the channel forbids forwarding, and to a
-// plain link when the bot cannot read the post at all.
-async function sendAnnouncement(env, settings, chatId, messageThreadId) {
+// plain link when the bot cannot read the post at all. Repeat commands inside
+// the cooldown window get a compact link plus buttons instead of another copy.
+async function sendAnnouncement(env, settings, chatId, messageThreadId, { force = false, userId = "", command = "start" } = {}) {
+  if (!force && userId) {
+    const shownAt = await readAnnouncementShownAt(env, userId);
+    if (shownAt && Date.now() - shownAt < ANNOUNCEMENT_COOLDOWN_MS) {
+      await sendAnnouncementShortcut(env, settings, chatId, messageThreadId, command);
+      return;
+    }
+  }
+
   const payload = {
     chat_id: chatId,
     from_chat_id: ANNOUNCEMENT_CHANNEL,
@@ -431,6 +550,7 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId) {
     }
   }
   if (delivered) {
+    await rememberAnnouncementShown(env, userId);
     await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
     return;
   }
@@ -445,19 +565,64 @@ async function sendAnnouncement(env, settings, chatId, messageThreadId) {
     },
   }).catch(() => {});
   const fallback = `欢迎使用 Emby 图标库，请查看公告：${ANNOUNCEMENT_URL}`;
-  // Only the configured reviewer chat sees the technical details; ordinary
-  // users still receive a clean link to the announcement.
-  const cleanError = (value) => String(value || "")
-    .replace(/^(?:Bad Request|Error):\s*/i, "").trim().slice(0, 200);
-  const details = [];
-  if (forwardError) details.push(`转发：${cleanError(forwardError)}`);
-  if (copyError) details.push(`复制：${cleanError(copyError)}`);
-  const diagnostic = chatId === settings.chatId && details.length
-    ? `\n\n公告转发失败\n${details.join("\n")}`
+  // Keep the technical detail in the audit log. The chat only gets a low-key
+  // note so a transient channel permission problem does not dominate the UI.
+  const quietNotice = chatId === settings.chatId
+    ? "\n\n公告自动转发未成功，已提供公告链接。"
     : "";
-  await sendTelegramMessage(settings.token, chatId, fallback + diagnostic);
+  await sendTelegramMessage(settings.token, chatId, fallback + quietNotice);
   await sendSubmissionEntry(env, settings.token, chatId, messageThreadId);
 }
+
+// /help is intentionally richer than /start: it documents the public commands
+// and the submission rules instead of replaying the same announcement text.
+async function sendHelpEntry(env, settings, chatId, messageThreadId) {
+  const chatType = telegramChatType(chatId);
+  const text = [
+    "📖 <b>Emby 图标库帮助</b>",
+    "",
+    "<b>提交与查询</b>",
+    "• /submit — 打开图标提交页面",
+    "• /my — 查看我的提交和审核状态",
+    "",
+    "<b>提交要求</b>",
+    "• 图标名称需唯一，长度为 1–120 个字符",
+    "• 图片地址必须能公开访问，建议使用 HTTPS 直链",
+    "• 支持 PNG、JPG、WebP、GIF、SVG 等常见图片格式",
+    "• 提交后进入人工审核，通常在 1–2 个工作日内处理",
+    "",
+    "<b>常见问题</b>",
+    "• 为什么提示重名：公开图标库只允许一个同名图标，可按建议改名后提交",
+    "• 为什么被拒绝：常见原因是图片模糊、重复或链接无法访问；拒绝原因会私聊发送",
+    "• 如何修改或撤回：打开 /my，选择对应记录；待审核记录可直接修改或撤回",
+    "• 为什么没收到通知：请先通过 /start 与机器人建立私聊，并确认未关闭机器人通知",
+  ].join("\n");
+  const keyboard = {
+    inline_keyboard: [
+      [miniAppButton("🖼 提交图标", SUBMIT_ENTRY_URL, chatType)],
+      [miniAppButton("📋 我的提交", MY_SUBMISSIONS_URL, chatType)],
+      [{ text: "📣 查看公告", url: ANNOUNCEMENT_URL }],
+    ],
+  };
+  try {
+    await telegramApi(settings.token, "sendMessage", {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      reply_markup: keyboard,
+    });
+  } catch (error) {
+    await writeAuditLog(env, {
+      actorId: "telegram",
+      action: "telegram-help-failed",
+      targetId: String(chatId),
+      details: { error: String(error?.message || "Help entry failed").slice(0, 240) },
+    }).catch(() => {});
+  }
+}
+
 
 // Same as sendTelegramMessage but for card bodies that already contain HTML.
 async function sendHtmlMessage(token, chatId, text, replyMarkup) {
@@ -863,6 +1028,12 @@ export async function handleAdminTelegramSettings(request, env) {
     try {
       await setTelegramCommands(token, chatId);
       commandsConfigured = true;
+      try {
+        await rememberCommandsVersion(env);
+      } catch {
+        // The menu was already updated. A failed version marker only causes a
+        // harmless re-sync on the next webhook update.
+      }
     } catch (error) {
       warnings.push("Bot 命令菜单设置失败，用户仍可发送 /start 或 /help。");
       await writeAuditLog(env, {
@@ -887,6 +1058,11 @@ export async function handleAdminTelegramSettings(request, env) {
       await resetTelegramCommands(token, chatId || current.chatId);
     } catch {
       // Disabling notifications should not depend on clearing optional bot commands.
+    }
+    try {
+      await env.EMBY_ICONS.delete(COMMANDS_VERSION_KEY);
+    } catch {
+      // Re-enabling will sync the menu even if this stale marker survives.
     }
   }
   return jsonResponse(request, {
@@ -1013,10 +1189,11 @@ export async function notifySubmissionResult(env, id) {
     const keyboard = approved
       ? null
       : {
-          inline_keyboard: [[{
-            text: "🔁 重新提交",
-            url: `${SUBMIT_MINI_APP_URL}?startapp=resubmit_${encodeURIComponent(id)}`,
-          }]],
+          inline_keyboard: [[miniAppButton(
+            "🔁 重新提交",
+            `${SUBMIT_MINI_APP_URL}?startapp=resubmit_${encodeURIComponent(id)}`,
+            "private",
+          )]],
         };
 
     try {
@@ -1413,6 +1590,15 @@ async function handleCallbackUpdate(request, env, settings, callback) {
   const chatId = String(callback.message?.chat?.id || "");
   const chatType = callback.message?.chat?.type;
   const userId = String(callback.from?.id || "");
+  if (String(callback.data || "") === "announcement:show") {
+    if (chatType !== "private" || !chatId || !userId || callback.from?.is_bot) {
+      await answerCallback(settings.token, callback.id, "此聊天未授权").catch(() => {});
+      return;
+    }
+    await answerCallback(settings.token, callback.id, "正在发送公告…").catch(() => {});
+    await sendAnnouncement(env, settings, chatId, undefined, { force: true, userId });
+    return;
+  }
   if (chatType !== "private" || chatId !== settings.chatId || !userId || callback.from?.is_bot) {
     await answerCallback(settings.token, callback.id, "此聊天或操作人未授权").catch(() => {});
     return;
@@ -1542,8 +1728,13 @@ async function handleMessageUpdate(env, settings, message) {
     await sendMySubmissionsEntry(env, settings, chatId, message.message_thread_id);
     return;
   }
-  if (/^\/(?:start|help)(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
-    await sendAnnouncement(env, settings, chatId, message.message_thread_id);
+  if (/^\/start(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+    await sendAnnouncement(env, settings, chatId, message.message_thread_id, { userId });
+    return;
+  }
+  if (/^\/help(?:@[^\s]+)?(?:\s|$)/i.test(text)) {
+    await sendHelpEntry(env, settings, chatId, message.message_thread_id);
+    await sendAnnouncement(env, settings, chatId, message.message_thread_id, { userId, command: "help" });
     return;
   }
   if (chatId !== settings.chatId) return;
@@ -1647,7 +1838,7 @@ async function handleMessageUpdate(env, settings, message) {
 }
 
 
-export async function handleTelegramWebhook(request, env, secretParam) {
+export async function handleTelegramWebhook(request, env, secretParam, waitUntil) {
   if (!env.EMBY_ICONS) return new Response("Not found", { status: 404 });
   let settings;
   try {
@@ -1657,6 +1848,11 @@ export async function handleTelegramWebhook(request, env, secretParam) {
   }
   if (!settings.enabled || !settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== settings.webhookSecret) return new Response("Not found", { status: 404 });
+
+  // Command menus are versioned in KV so a deploy that adds a command does not
+  // depend on an administrator saving the settings again. This check is
+  // best-effort and never blocks update processing.
+  await syncTelegramCommandsIfNeeded(env, settings, waitUntil);
 
   let update;
   try {

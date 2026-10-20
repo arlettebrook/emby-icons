@@ -843,9 +843,10 @@ test("/start forwards the channel announcement to any user", async () => {
     assert.match(entry.payload.text, /审核通过后会收录到公开图标库/);
     assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "🖼 提交图标");
     assert.equal(
-      entry.payload.reply_markup.inline_keyboard[0][0].url,
+      entry.payload.reply_markup.inline_keyboard[0][0].web_app.url,
       "https://t.me/emby_icons_bot/submit?startapp=channel8",
     );
+    assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].url, undefined);
   } finally {
     mock.restore();
   }
@@ -881,8 +882,8 @@ test("/submit opens the submission Mini App from a private chat", async () => {
     const button = entry.payload.reply_markup.inline_keyboard[0][0];
     assert.match(entry.payload.text, /打开图标提交页面/);
     assert.equal(button.text, "🖼 打开图标提交");
-    assert.equal(button.url, "https://t.me/emby_icons_bot/submit?startapp=command");
-    assert.equal(button.web_app, undefined);
+    assert.equal(button.web_app.url, "https://t.me/emby_icons_bot/submit?startapp=command");
+    assert.equal(button.url, undefined);
     assert.equal(mock.method("forwardMessage").length, 0);
   } finally {
     mock.restore();
@@ -944,8 +945,8 @@ test("the admin sees why the announcement could not be forwarded", async () => {
       !call.payload.reply_markup && /MikuNaNChannel\/8/.test(call.payload.text)
     );
     assert.match(send.payload.text, /MikuNaNChannel\/8/);
-    assert.match(send.payload.text, /公告转发失败\n转发：message can't be forwarded\n复制：chat not found/);
-    assert.doesNotMatch(send.payload.text, /Bad Request/);
+    assert.match(send.payload.text, /公告自动转发未成功，已提供公告链接/);
+    assert.doesNotMatch(send.payload.text, /message can't be forwarded|chat not found|Bad Request/);
     assert.ok(lastSubmissionEntry(), "expected a submission entry after the link fallback");
     const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-announcement-failed");
     assert.ok(audit, "expected the failure to be recorded");
@@ -1376,7 +1377,7 @@ telegramTest("/my and the Telegram submission list expose only the current users
   await message(secret, env, "/my", 31, { userId: "9106", chatId: "9106" });
   const entry = mock.method("sendMessage").at(-1);
   assert.equal(entry.payload.chat_id, "9106");
-  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].url, "https://t.me/emby_icons_bot/submit?startapp=my");
+  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].web_app.url, "https://t.me/emby_icons_bot/submit?startapp=my");
 
   const response = await handleMySubmissionList(
     new Request("https://example.com/api/my/submissions", {
@@ -1417,7 +1418,7 @@ telegramTest("rejection notification includes the reason and a resubmit Mini App
   const button = sent.payload.reply_markup.inline_keyboard[0][0];
   assert.equal(button.text, "🔁 重新提交");
   assert.equal(
-    button.url,
+    button.web_app.url,
     "https://t.me/emby_icons_bot/submit?startapp=resubmit_" + encodeURIComponent(id),
   );
 });

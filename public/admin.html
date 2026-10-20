@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Emby Icons 管理面板</title>
-    <link rel="stylesheet" href="/styles.css?v=20261017-ui33" />
+    <link rel="stylesheet" href="/styles.css?v=20261020-ui35" />
     <style>
       .moderation-dialog { width: min(980px, calc(100% - 28px)); max-height: min(820px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .moderation-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
@@ -22,7 +22,14 @@
       .moderation-item p { margin: 3px 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
       .moderation-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .moderation-filter { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-      .moderation-filter select { padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+      .moderation-actions { justify-content: flex-end; }
+      .moderation-filter select, .moderation-filter input { padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+      .moderation-filter input { width: 160px; }
+      .moderation-summary { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .moderation-empty { margin-top: 16px; padding: 24px 14px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-soft); color: var(--muted); font-size: 13px; text-align: center; }
+      .moderation-empty[hidden] { display: none; }
+      .moderation-more-wrap { display: flex; justify-content: center; margin-top: 14px; }
+      .moderation-more-wrap .button[hidden] { display: none; }
       .moderation-actions .danger { border-color: rgb(255 113 140 / 45%); color: var(--danger); }
       .moderation-conflict { margin-top: 9px; padding: 9px 11px; border: 1px solid rgb(217 119 6 / 40%); border-radius: 8px; background: rgb(255 247 237 / 94%); color: #92400e; }
       .moderation-conflict strong { display: block; margin-bottom: 4px; font-size: 12px; }
@@ -69,6 +76,34 @@
       @media (max-width: 700px) { .moderation-heading { align-items: flex-start; flex-direction: column; } .moderation-item { grid-template-columns: 52px minmax(0, 1fr); } .moderation-item img { width: 48px; height: 48px; } .moderation-actions { grid-column: 1 / -1; } .telegram-settings-heading, .telegram-settings-footer { align-items: stretch; flex-direction: column; } .telegram-settings-grid { grid-template-columns: 1fr; } .telegram-settings-footer .button { width: 100%; } }
       @media (max-width: 700px) { .moderation-dialog { width: calc(100% - 20px); max-height: calc(100vh - 20px); } .moderation-panel { padding: 17px; } .moderation-heading { gap: 14px; } .moderation-actions { width: 100%; flex-wrap: wrap; } .moderation-actions .button { flex: 1 1 130px; } .moderation-item { gap: 10px; padding: 11px; } .telegram-settings { padding-inline: 12px; } .telegram-settings-summary { gap: 10px; padding-block: 14px; } .telegram-settings-badge { display: none; } .github-proxy-panel { padding: 18px; } }
       @media (max-width: 420px) { .moderation-panel { padding: 14px; } .moderation-item { grid-template-columns: 44px minmax(0, 1fr); } .moderation-item img { width: 42px; height: 42px; } .moderation-actions .button { flex-basis: 100%; } .telegram-settings { margin-top: 14px; padding-inline: 10px; } .github-proxy-dialog { width: calc(100% - 16px); } .github-proxy-panel { padding: 15px; } }
+      .versions-dialog { width: min(1080px, calc(100% - 28px)); max-height: min(900px, calc(100vh - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
+      .versions-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
+      .versions-panel { display: flex; flex-direction: column; max-height: calc(100vh - 28px); padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+      .versions-layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; min-height: 0; margin-top: 18px; flex: 1; }
+      .versions-sidebar { display: flex; flex-direction: column; min-height: 0; padding-right: 16px; border-right: 1px solid var(--line); }
+      .versions-list { display: grid; align-content: start; gap: 8px; min-height: 180px; overflow: auto; padding-right: 4px; }
+      .version-row { display: grid; gap: 4px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+      .version-row:hover, .version-row.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+      .version-row strong { font-size: 13px; }
+      .version-row span { overflow: hidden; color: var(--muted); font-size: 11px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+      .versions-more-wrap { display: flex; justify-content: center; margin-top: 12px; }
+      .versions-more-wrap .button[hidden] { display: none; }
+      .versions-detail { min-height: 0; overflow: auto; padding-right: 4px; }
+      .versions-placeholder { display: grid; min-height: 220px; place-items: center; padding: 24px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-soft); color: var(--muted); font-size: 13px; text-align: center; }
+      .versions-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+      .versions-detail-heading h3 { margin: 4px 0 6px; }
+      .versions-detail-heading p:last-child, .versions-document-meta, .versions-preview-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .versions-document-meta { margin-top: 14px; }
+      .versions-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 8px; margin-top: 13px; }
+      .version-preview-card { display: grid; place-items: center; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+      .version-preview-card img { width: 54px; height: 54px; object-fit: contain; border-radius: 6px; background: #07100e; }
+      .version-preview-card span { display: block; width: 100%; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 10px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+      .versions-preview-note { margin-top: 9px; }
+      .versions-json { margin-top: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+      .versions-json summary { padding: 11px 13px; color: var(--muted); font-size: 12px; cursor: pointer; }
+      .versions-json pre { max-height: 300px; margin: 0; overflow: auto; padding: 0 13px 13px; color: var(--ink); font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      @media (max-width: 800px) { .versions-panel { padding: 17px; } .versions-layout { grid-template-columns: 1fr; overflow: auto; } .versions-sidebar { max-height: 260px; padding: 0 0 14px; border-right: 0; border-bottom: 1px solid var(--line); } .versions-detail { overflow: visible; } .versions-detail-heading { align-items: stretch; flex-direction: column; } .versions-detail-heading .button { width: 100%; } }
+      @media (max-width: 520px) { .versions-dialog { width: calc(100% - 16px); } .versions-panel { max-height: calc(100vh - 16px); padding: 14px; } .versions-preview-grid { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); } .version-preview-card img { width: 46px; height: 46px; } }
     </style>
   </head>
   <body>
@@ -99,6 +134,7 @@
           <a class="button button-secondary" href="/">普通主页</a>
           <button class="button button-secondary" id="icon-validity-open-button" type="button">图标有效性检测</button>
           <button class="button button-secondary" id="moderation-open-button" type="button">审核队列</button>
+          <button class="button button-secondary" id="versions-open-button" type="button">版本历史</button>
           <button class="button button-secondary" id="import-button" type="button"><span class="button-icon" aria-hidden="true">↓</span>导入 JSON</button>
           <button class="button button-primary" id="copy-public-button" type="button"><span class="button-icon" aria-hidden="true">⧉</span>复制图标库地址</button>
           <button class="button button-secondary" id="export-button" type="button"><span class="button-icon" aria-hidden="true">↑</span>导出 JSON</button>
@@ -248,7 +284,13 @@
             <h2>用户提交审核</h2>
             <p>普通用户的提交只有审核通过后才会进入正式图标库。</p>
           </div>
-          <div class="moderation-actions"><label class="moderation-filter"><span>显示</span><select id="moderation-filter"><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="withdrawn">已撤回</option><option value="all">全部</option></select></label><button class="button button-secondary" id="moderation-refresh" type="button">刷新队列</button><button class="button button-secondary" id="moderation-close-button" type="button">关闭</button></div>
+          <div class="moderation-actions">
+            <label class="moderation-filter"><span>显示</span><select id="moderation-filter"><option value="pending">待审核</option><option value="approving">发布中</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="withdrawn">已撤回</option><option value="all">全部</option></select></label>
+            <label class="moderation-filter"><span>搜索</span><input id="moderation-search" type="search" maxlength="200" placeholder="名称或 URL" autocomplete="off" /></label>
+            <label class="moderation-filter"><span>审核人</span><select id="moderation-reviewer"><option value="">全部</option></select></label>
+            <button class="button button-secondary" id="moderation-refresh" type="button">刷新队列</button>
+            <button class="button button-secondary" id="moderation-close-button" type="button">关闭</button>
+          </div>
         </div>
         <details class="telegram-settings" id="telegram-settings">
           <summary class="telegram-settings-summary">
@@ -282,9 +324,56 @@
             </div>
           </div>
         </details>
+        <p class="moderation-summary" id="moderation-summary"></p>
         <p class="moderation-status" id="moderation-status">正在加载待审核提交…</p>
         <div class="moderation-list" id="moderation-list"></div>
+        <div class="moderation-empty" id="moderation-empty" hidden>没有符合条件的提交。</div>
+        <div class="moderation-more-wrap"><button class="button button-secondary" id="moderation-more" type="button" hidden>加载更多</button></div>
       </section>
+      </dialog>
+
+      <dialog class="versions-dialog" id="versions-dialog">
+        <section class="versions-panel" aria-labelledby="versions-title">
+          <div class="moderation-heading">
+            <div>
+              <p class="eyebrow">ADMIN / VERSION HISTORY</p>
+              <h2 id="versions-title">文档版本历史</h2>
+              <p>查看自动保存的快照。回滚前会先保存当前线上版本，因此误操作也可以再次恢复。</p>
+            </div>
+            <div class="moderation-actions">
+              <button class="button button-secondary" id="versions-refresh" type="button">刷新</button>
+              <button class="button button-secondary" id="versions-close" type="button">关闭</button>
+            </div>
+          </div>
+          <div class="versions-layout">
+            <aside class="versions-sidebar" aria-label="版本列表">
+              <p class="moderation-status" id="versions-status" role="status">正在加载版本历史…</p>
+              <div class="versions-list" id="versions-list"></div>
+              <div class="versions-more-wrap"><button class="button button-secondary" id="versions-more" type="button" hidden>加载更早版本</button></div>
+            </aside>
+            <section class="versions-detail" aria-live="polite">
+              <div class="versions-placeholder" id="versions-placeholder">从左侧选择一个版本以查看文档和图标预览。</div>
+              <div id="versions-detail-content" hidden>
+                <div class="versions-detail-heading">
+                  <div>
+                    <p class="eyebrow">SELECTED SNAPSHOT</p>
+                    <h3 id="version-detail-title"></h3>
+                    <p id="version-detail-meta"></p>
+                  </div>
+                  <button class="button button-primary" id="version-restore-button" type="button" disabled>回滚到此版本</button>
+                </div>
+                <p class="dialog-error" id="versions-error"></p>
+                <p class="versions-document-meta" id="version-document-meta"></p>
+                <div class="versions-preview-grid" id="version-preview-grid"></div>
+                <p class="versions-preview-note" id="version-preview-note"></p>
+                <details class="versions-json">
+                  <summary>查看完整快照 JSON</summary>
+                  <pre id="version-json"></pre>
+                </details>
+              </div>
+            </section>
+          </div>
+        </section>
       </dialog>
     </main>
 
@@ -422,7 +511,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </div>
-    <script type="module" src="/admin-entry.js?v=20261017-ui33"></script>
+    <script type="module" src="/admin-entry.js?v=20261020-ui35"></script>
   </body>
 </html>
 

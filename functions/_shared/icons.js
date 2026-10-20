@@ -117,7 +117,7 @@ function jsonResponse(body, init = {}, responseCorsHeaders = corsHeaders) {
   return new Response(JSON.stringify(body), { ...init, headers });
 }
 
-function validateDocument(document) {
+export function validateDocument(document) {
   if (!document || typeof document !== "object" || Array.isArray(document)) return "Root must be a JSON object";
   if (typeof document.name !== "string" || !document.name.trim()) return "name must be a non-empty string";
   if (typeof document.description !== "string") return "description must be a string";
@@ -281,8 +281,8 @@ export async function handlePut(request, env) {
   );
 }
 
-// Names waiting in the review queue. Suggestions are filtered against these
-// too, so we never offer a name that is already awaiting review.
+// Names waiting in the review queue are only loaded when a conflict needs
+// rename suggestions. Free names therefore stay a single indexed lookup.
 async function listPendingNameRows(env) {
   if (!env?.DB) return [];
   try {
@@ -295,30 +295,92 @@ async function listPendingNameRows(env) {
   }
 }
 
+async function findPendingName(env, normalizedName) {
+  if (!env?.DB) return null;
+  try {
+    return await env.DB.prepare(
+      `SELECT id, name, url
+         FROM submissions
+        WHERE status = 'pending'
+          AND (
+            normalized_name = ?1
+            OR (normalized_name IS NULL AND lower(trim(name)) = ?1)
+          )
+        LIMIT 1`,
+    ).bind(normalizedName).first();
+  } catch {
+    return null;
+  }
+}
+
+async function nameCheckRateLimit(request, env) {
+  const secret = String(env.SUBMISSION_HASH_SECRET || "").trim();
+  if (!secret) {
+    return jsonResponse(
+      { error: "名称检查服务未配置安全密钥。", code: "NAME_CHECK_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (!env.DB) {
+    return jsonResponse(
+      { error: "名称检查服务暂时不可用。", code: "NAME_CHECK_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`name-check:${ip}`));
+  const ipHash = Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const now = Date.now();
+  const cutoff = now - 60 * 1000;
+  const limit = 30;
+  const attempt = await env.DB.prepare(
+    `INSERT INTO name_check_attempts (ip_hash, created_at)
+     SELECT ?1, ?2
+      WHERE (SELECT COUNT(*) FROM name_check_attempts WHERE ip_hash = ?1 AND created_at >= ?3) < ?4`,
+  ).bind(ipHash, now, cutoff, limit).run();
+  if (!attempt.meta?.changes) {
+    return jsonResponse(
+      { error: "名称检查过于频繁，请稍后再试。", code: "NAME_CHECK_RATE_LIMITED" },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": "60" } },
+    );
+  }
+  return null;
+}
+
 export async function handleNameCheck(request, env) {
   const name = String(new URL(request.url).searchParams.get("name") || "").trim().slice(0, 200);
   const headers = { "Cache-Control": "no-store" };
   const empty = { name, exists: false, conflict: null, suggestions: [], queueDuplicate: false, queue: null };
+  // Empty input is common while a user is typing and must not consume quota.
   if (!name) return jsonResponse(empty, { headers });
+  const rateLimited = await nameCheckRateLimit(request, env);
+  if (rateLimited) return rateLimited;
   try {
     const { text } = await readDocument(env);
     const document = text === null ? { icons: [] } : JSON.parse(text);
     const list = Array.isArray(document?.icons) ? document.icons : [];
     const conflict = findIconNameConflict(list, name);
-    // A name that is not published yet can still collide with a waiting
-    // submission, so flag that as an advisory while allowing the submit.
-    const pendingRows = await listPendingNameRows(env);
     const key = normalizeIconName(name);
-    const pending = pendingRows.find((row) => normalizeIconName(row.name) === key) || null;
-    // Merge published and queued names so a suggestion is never a name that
-    // already exists or is already waiting for review.
+    // Exact lookup first. A queue-wide scan is only needed when a suggestion
+    // has to avoid every pending name, not for every keystroke.
+    const pending = await findPendingName(env, key);
+    const needsSuggestions = Boolean(conflict || pending);
+    const pendingRows = needsSuggestions ? await listPendingNameRows(env) : [];
     const taken = [...list, ...pendingRows];
     return jsonResponse(
       {
         name,
         exists: Boolean(conflict),
         conflict: conflict ? { name: conflict.name, url: conflict.url } : null,
-        suggestions: conflict || pending ? suggestIconNames(name, taken, 2) : [],
+        suggestions: needsSuggestions ? suggestIconNames(name, taken, 2) : [],
         queueDuplicate: Boolean(pending),
         queue: pending ? { name: pending.name } : null,
       },

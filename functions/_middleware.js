@@ -1,5 +1,6 @@
 import { hasAdminSession } from "./_shared/admin.js";
 import { ensureDatabaseSchema } from "./_shared/database.js";
+import { runPeriodicMaintenance } from "./_shared/maintenance.js";
 
 const protectedPages = new Set(["/admin.html", "/review.html"]);
 
@@ -25,6 +26,11 @@ export async function onRequest(context) {
   if (context.env?.DB) {
     try {
       await ensureDatabaseSchema(context.env);
+      const maintenance = runPeriodicMaintenance(context.env).catch((error) => {
+        console.warn("Periodic maintenance failed", error);
+      });
+      if (typeof context.waitUntil === "function") context.waitUntil(maintenance);
+      else void maintenance;
     } catch (error) {
       console.error(`数据库自动迁移失败：${error instanceof Error ? error.stack || error.message : String(error)}`);
       if (isApiRequest(pathname)) return databaseUnavailableResponse();

@@ -22,6 +22,13 @@ const MAX_NAME_LENGTH = 120;
 const MAX_URL_LENGTH = 2048;
 const MAX_NOTE_LENGTH = 1000;
 const DEFAULT_SUBMISSIONS_PER_IP_PER_DAY = 20;
+const ALLOWED_SUBMISSION_SOURCES = new Set(["channel8", "menu", "command"]);
+const NON_IMAGE_EXTENSIONS = new Set([
+  ".7z", ".apk", ".avi", ".bin", ".csv", ".dmg", ".doc", ".docx", ".exe",
+  ".gz", ".htm", ".html", ".iso", ".json", ".m4a", ".mkv", ".mov", ".mp3",
+  ".mp4", ".pdf", ".ppt", ".pptx", ".rar", ".tar", ".txt", ".wav", ".xls",
+  ".xlsx", ".xml", ".zip",
+]);
 
 function corsHeaders(request, env) {
   const headers = {
@@ -113,10 +120,19 @@ function validateSubmission(value) {
   }
   if (url.protocol !== "https:") return { error: "url must use HTTPS" };
   if (url.username || url.password) return { error: "url must not contain credentials" };
+  const extension = url.pathname.toLowerCase().match(/\.[a-z0-9]{1,10}$/)?.[0] || "";
+  if (NON_IMAGE_EXTENSIONS.has(extension)) {
+    return { error: "url must point to an image, not a document or archive" };
+  }
 
   const note = value.note === undefined ? "" : trimString(value.note, "note", MAX_NOTE_LENGTH, false);
   if (typeof note !== "string") return { error: note };
   return { value: { name, url: url.href, note } };
+}
+
+function normalizeSubmissionSource(value) {
+  const source = typeof value === "string" ? value.trim().toLowerCase().slice(0, 64) : "";
+  return ALLOWED_SUBMISSION_SOURCES.has(source) ? source : "direct";
 }
 
 async function readJson(request, env) {
@@ -170,7 +186,7 @@ async function readSubmission(env, id) {
   return env.DB.prepare(
     `SELECT id, name, url, note, status, submitter_token_hash, ip_hash, created_at,
             reviewer_id, reviewer_note, reviewed_at,
-            telegram_user_id, telegram_username, result_notified_at
+            telegram_user_id, telegram_username, result_notified_at, source, normalized_name
        FROM submissions WHERE id = ?1`,
   )
     .bind(id)
@@ -249,7 +265,7 @@ async function requireAdmin(request, env) {
   return null;
 }
 
-async function acquirePublicationLock(env, owner) {
+export async function acquirePublicationLock(env, owner) {
   const now = Date.now();
   const expiresAt = now + 30_000;
   await env.DB.prepare(
@@ -264,7 +280,7 @@ async function acquirePublicationLock(env, owner) {
   return lock?.owner === owner;
 }
 
-async function releasePublicationLock(env, owner) {
+export async function releasePublicationLock(env, owner) {
   await env.DB.prepare("DELETE FROM document_publish_lock WHERE lock_name = 'canonical' AND owner = ?1").bind(owner).run();
 }
 
@@ -283,10 +299,11 @@ async function finalizeApproval(env, id, reviewerId, name, fields = {}) {
   // COALESCE keeps the stored url/note unless an edit explicitly overrides them.
   const updated = await env.DB
     .prepare(
-      "UPDATE submissions SET status = 'approved', name = ?1, url = COALESCE(?2, url), note = COALESCE(?3, note), reviewer_id = ?4, reviewed_at = ?5 WHERE id = ?6 AND status IN ('approving', 'pending')",
+      "UPDATE submissions SET status = 'approved', name = ?1, normalized_name = ?2, url = COALESCE(?3, url), note = COALESCE(?4, note), reviewer_id = ?5, reviewed_at = ?6 WHERE id = ?7 AND status IN ('approving', 'pending')",
     )
     .bind(
       name,
+      normalizeIconName(name),
       fields.url === undefined ? null : fields.url,
       fields.note === undefined ? null : fields.note,
       reviewerId,
@@ -367,11 +384,12 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
   const accessToken = createToken();
   const tokenHash = await hashValue(accessToken, env);
   const now = Date.now();
+  const source = normalizeSubmissionSource(body.startapp);
   await env.DB.prepare(
     `INSERT INTO submissions
       (id, name, url, note, status, submitter_token_hash, ip_hash, created_at,
-       telegram_user_id, telegram_username)
-     VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9)`,
+       telegram_user_id, telegram_username, source, normalized_name)
+     VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
   )
     .bind(
       id,
@@ -383,6 +401,8 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
       now,
       identity?.id || null,
       telegramUsername,
+      source,
+      normalizeIconName(validation.value.name),
     )
     .run();
 
@@ -393,6 +413,7 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
     details: {
       name: validation.value.name,
       url: validation.value.url,
+      source,
       telegramBound: Boolean(identity),
     },
   });
@@ -408,7 +429,7 @@ export async function handleSubmissionCreate(request, env, waitUntil) {
     env,
     {
       ok: true,
-      submission: { id, status: "pending", name: validation.value.name, url: validation.value.url },
+      submission: { id, status: "pending", name: validation.value.name, url: validation.value.url, source },
       accessToken,
       telegramBound: Boolean(identity),
     },
@@ -466,8 +487,8 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
     // 访问令牌只能证明「这条记录是你的」，挡不住拿着真实令牌的批量脚本。
     const turnstileError = await verifyTurnstile(request, env, body);
     if (turnstileError) return jsonResponse(request, env, { error: turnstileError }, { status: 403 });
-    await env.DB.prepare("UPDATE submissions SET name = ?1, url = ?2, note = ?3 WHERE id = ?4 AND status = 'pending'")
-      .bind(validation.value.name, validation.value.url, validation.value.note, id)
+    await env.DB.prepare("UPDATE submissions SET name = ?1, normalized_name = ?2, url = ?3, note = ?4 WHERE id = ?5 AND status = 'pending'")
+      .bind(validation.value.name, normalizeIconName(validation.value.name), validation.value.url, validation.value.note, id)
       .run();
     await writeAuditLog(env, { actorId: `submission:${id}`, action: "submission-updated", targetId: id, details: validation.value });
     return jsonResponse(request, env, { ok: true, submission: { ...publicSubmission(row), ...validation.value } });
@@ -488,9 +509,9 @@ export async function handleSubmissionItem(request, env, id, waitUntil) {
 
   const reset = await env.DB
     .prepare(
-      "UPDATE submissions SET name = ?1, url = ?2, note = ?3, status = 'pending', reviewer_id = NULL, reviewer_note = NULL, reviewed_at = NULL, result_notified_at = NULL WHERE id = ?4 AND status IN ('rejected', 'withdrawn')",
+      "UPDATE submissions SET name = ?1, normalized_name = ?2, url = ?3, note = ?4, status = 'pending', reviewer_id = NULL, reviewer_note = NULL, reviewed_at = NULL, result_notified_at = NULL WHERE id = ?5 AND status IN ('rejected', 'withdrawn')",
     )
-    .bind(validation.value.name, validation.value.url, validation.value.note, id)
+    .bind(validation.value.name, normalizeIconName(validation.value.name), validation.value.url, validation.value.note, id)
     .run();
   if (!reset.meta?.changes) {
     const latest = await readSubmission(env, id);
@@ -552,6 +573,28 @@ export async function handleMySubmissionList(request, env) {
   return jsonResponse(request, env, { submissions: rows.results || [] });
 }
 
+const ADMIN_LIST_STATUSES = new Set(["pending", "approving", "approved", "rejected", "withdrawn", "all"]);
+
+function encodeSubmissionCursor(row) {
+  const payload = JSON.stringify({ createdAt: Number(row.created_at), id: String(row.id) });
+  return btoa(payload).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function decodeSubmissionCursor(value) {
+  if (!value) return null;
+  try {
+    const padded = value.replaceAll("-", "+").replaceAll("_", "/")
+      + "=".repeat((4 - (value.length % 4)) % 4);
+    const parsed = JSON.parse(atob(padded));
+    const createdAt = Number(parsed?.createdAt);
+    const id = String(parsed?.id || "");
+    if (!Number.isSafeInteger(createdAt) || createdAt < 0 || !id) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
 export async function handleAdminSubmissionList(request, env) {
   const missingDb = requireDatabase(request, env);
   if (missingDb) return missingDb;
@@ -559,22 +602,82 @@ export async function handleAdminSubmissionList(request, env) {
   if (authError) return authError;
   const url = new URL(request.url);
   const status = url.searchParams.get("status") || "pending";
-  const allowedStatuses = new Set(["pending", "approved", "rejected", "withdrawn", "all"]);
-  if (!allowedStatuses.has(status)) return jsonResponse(request, env, { error: "Invalid status" }, { status: 400 });
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 50), 1), 100);
-  const query = status === "all"
-    ? "SELECT id, name, url, note, status, created_at, reviewer_id, reviewer_note, reviewed_at FROM submissions ORDER BY created_at DESC LIMIT ?1"
-    : "SELECT id, name, url, note, status, created_at, reviewer_id, reviewer_note, reviewed_at FROM submissions WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2";
-  const result = status === "all"
-    ? await env.DB.prepare(query).bind(limit).all()
-    : await env.DB.prepare(query).bind(status, limit).all();
-  const rows = result.results || [];
+  if (!ADMIN_LIST_STATUSES.has(status)) {
+    return jsonResponse(request, env, { error: "Invalid status" }, { status: 400 });
+  }
+  const requestedLimit = Number(url.searchParams.get("limit") || 50);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
+    : 50;
+  const q = String(url.searchParams.get("q") || "").trim().slice(0, 200);
+  const reviewerId = String(url.searchParams.get("reviewerId") || "").trim().slice(0, 128);
+  const cursorParam = url.searchParams.get("cursor") || "";
+  const cursor = decodeSubmissionCursor(cursorParam);
+  if (cursorParam && !cursor) {
+    return jsonResponse(request, env, { error: "Invalid cursor" }, { status: 400 });
+  }
+
+  // One stable query shape keeps pagination deterministic even when the name,
+  // URL or reviewer filters change. The extra row tells us whether a next page
+  // exists without a second COUNT query.
+  const result = await env.DB.prepare(
+    `SELECT id, name, url, note, status, source, created_at, reviewer_id,
+            reviewer_note, reviewed_at
+       FROM submissions
+      WHERE (?1 = 'all' OR status = ?1)
+        AND (?2 = '' OR name LIKE ?3 COLLATE NOCASE OR url LIKE ?3 COLLATE NOCASE)
+        AND (?4 = '' OR reviewer_id = ?4)
+        AND (?5 = 0 OR created_at < ?6 OR (created_at = ?6 AND id < ?7))
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?8`,
+  )
+    .bind(
+      status,
+      q,
+      `%${q}%`,
+      reviewerId,
+      cursor ? 1 : 0,
+      cursor?.createdAt || 0,
+      cursor?.id || "",
+      limit + 1,
+    )
+    .all();
+  const rawRows = Array.isArray(result.results) ? result.results : [];
+  const hasMore = rawRows.length > limit;
+  const rows = rawRows.slice(0, limit);
+  const nextCursor = hasMore && rows.length ? encodeSubmissionCursor(rows[rows.length - 1]) : null;
+
+  const statsResult = await env.DB.prepare(
+    `SELECT status, source, reviewer_id, COUNT(*) AS count
+       FROM submissions
+      GROUP BY status, source, reviewer_id`,
+  ).all();
+  const stats = {
+    pending: 0,
+    approving: 0,
+    total: 0,
+    byStatus: {},
+    bySource: {},
+    byReviewer: {},
+  };
+  for (const stat of statsResult.results || []) {
+    const count = Number(stat.count || 0);
+    const statStatus = String(stat.status || "unknown");
+    const source = String(stat.source || "direct");
+    const reviewer = String(stat.reviewer_id || "unreviewed");
+    stats.total += count;
+    stats.byStatus[statStatus] = (stats.byStatus[statStatus] || 0) + count;
+    stats.bySource[source] = (stats.bySource[source] || 0) + count;
+    stats.byReviewer[reviewer] = (stats.byReviewer[reviewer] || 0) + count;
+  }
+  stats.pending = stats.byStatus.pending || 0;
+  stats.approving = stats.byStatus.approving || 0;
 
   // Pre-check the pending queue against the published document so reviewers see
   // name conflicts before they try to approve. A broken/unavailable KV must not
   // take down the whole review queue.
   let icons = null;
-  if (env.EMBY_ICONS && (status === "pending" || status === "all")) {
+  if (env.EMBY_ICONS && rows.some((row) => row.status === "pending")) {
     try {
       const current = await readDocument(env);
       if (current.text !== null) {
@@ -603,9 +706,8 @@ export async function handleAdminSubmissionList(request, env) {
       })
     : rows;
 
-  return jsonResponse(request, env, { submissions });
+  return jsonResponse(request, env, { submissions, nextCursor, stats });
 }
-
 async function notifySubmissionResultBestEffort(env, id, waitUntil) {
   const task = (async () => {
     try {

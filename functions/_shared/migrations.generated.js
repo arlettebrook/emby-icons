@@ -11,5 +11,13 @@ export const MIGRATIONS = [
   {
     "id": "0003_telegram_identity.sql",
     "sql": "ALTER TABLE submissions ADD COLUMN telegram_user_id INTEGER;\nALTER TABLE submissions ADD COLUMN telegram_username TEXT;\nALTER TABLE submissions ADD COLUMN result_notified_at INTEGER;\n\nCREATE INDEX IF NOT EXISTS submissions_telegram_user_created_idx\n  ON submissions (telegram_user_id, created_at DESC);\n"
+  },
+  {
+    "id": "0004_submission_ops.sql",
+    "sql": "ALTER TABLE submissions ADD COLUMN source TEXT NOT NULL DEFAULT 'direct';\nALTER TABLE submissions ADD COLUMN normalized_name TEXT;\n\n-- Backfill existing rows with the closest SQLite-compatible normalization.\n-- New writes always store the canonical normalizeIconName() result.\nUPDATE submissions\n   SET normalized_name = lower(trim(name))\n WHERE normalized_name IS NULL;\n\nCREATE INDEX IF NOT EXISTS submissions_normalized_status_idx\n  ON submissions (normalized_name, status);\n\nCREATE INDEX IF NOT EXISTS submissions_source_created_idx\n  ON submissions (source, created_at DESC);\n\nCREATE INDEX IF NOT EXISTS submissions_reviewer_created_idx\n  ON submissions (reviewer_id, created_at DESC);\n\nCREATE INDEX IF NOT EXISTS submissions_status_reviewed_idx\n  ON submissions (status, reviewed_at);\n\nCREATE TABLE IF NOT EXISTS name_check_attempts (\n  ip_hash TEXT NOT NULL,\n  created_at INTEGER NOT NULL\n);\n\nCREATE INDEX IF NOT EXISTS name_check_attempts_ip_created_idx\n  ON name_check_attempts (ip_hash, created_at);\n"
+  },
+  {
+    "id": "0005_retention_indexes.sql",
+    "sql": "CREATE INDEX IF NOT EXISTS audit_logs_created_idx\n  ON audit_logs (created_at);\n\nCREATE INDEX IF NOT EXISTS submission_attempts_created_idx\n  ON submission_attempts (created_at);\n\nCREATE INDEX IF NOT EXISTS name_check_attempts_created_idx\n  ON name_check_attempts (created_at);\n\nCREATE INDEX IF NOT EXISTS document_versions_created_id_idx\n  ON document_versions (created_at, id);"
   }
 ];

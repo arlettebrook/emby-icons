@@ -134,6 +134,15 @@
       .turnstile-box { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfd; }
       .turnstile-box[hidden] { display: none; }
       .turnstile-box .form-note.error { color: var(--danger); font-weight: 700; }
+      .image-preview { display: grid; justify-items: center; gap: 8px; margin: 12px 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfd; text-align: center; }
+      .image-preview[hidden] { display: none; }
+      .image-preview img { display: block; max-width: 100%; max-height: 180px; border-radius: 8px; object-fit: contain; background: #fff; }
+      .image-preview p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .image-preview.is-loading img { opacity: .65; }
+      .image-preview.is-ok p { color: var(--accent-strong); }
+      .image-preview.is-error { border-color: rgb(255 113 140 / 42%); background: rgb(255 113 140 / 8%); }
+      .image-preview.is-error p { color: var(--danger); }
+      .standalone-form .image-preview { margin: 0; }
       #turnstile-container { min-height: 65px; }
 
       /* 操作按钮 */
@@ -229,12 +238,14 @@
             <div class="detail-body">
               <p class="detail-eyebrow" id="detail-eyebrow">记录详情</p>
               <dl class="submission-info" id="submission-info"></dl>
+              <div class="image-preview" id="detail-image-preview" role="status" aria-live="polite" hidden></div>
               <div class="standalone-result" id="detail-result" role="status" aria-live="polite" hidden></div>
               <!-- 表单只在点卡片上的「编辑提交 / 编辑并重新提交」时才展开；默认这里是只读详情。 -->
               <form class="standalone-form" id="edit-form" hidden>
                 <p class="form-note" id="edit-hint" hidden>当前是待审核记录，直接改名称、链接或说明，通过下方的人机验证后点「保存修改」；点「取消」放弃本次改动。撤回和删除在卡片右侧。</p>
                 <label class="field"><span>图标名称</span><input id="edit-name" maxlength="120" required /></label>
                 <label class="field"><span>图标 URL</span><input id="edit-url" type="url" maxlength="2048" required /></label>
+                <div class="image-preview" id="edit-image-preview" role="status" aria-live="polite" hidden></div>
                 <label class="field"><span>补充说明</span><textarea id="edit-note" maxlength="1000"></textarea></label>
                 <p class="form-note accent" id="resubmit-hint" hidden>改好后通过下方的人机验证，再点「重新提交审核」，它会重新回到待审核队列，之前的拒绝原因会被清空。</p>
                 <div class="turnstile-box" id="detail-turnstile" hidden>
@@ -258,6 +269,6 @@
       // Cloudflare Turnstile 的 Site Key 不是秘密值；编辑提交 / 重新提交和 /submit.html 复用同一个控件。
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submission.js?v=20261020-notify1"></script>
+    <script type="module" src="/submission.js?v=20261020-preview1"></script>
   </body>
 </html>
