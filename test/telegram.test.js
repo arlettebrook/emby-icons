@@ -103,13 +103,8 @@ async function configureTelegram(env, chatId = CHAT_ID) {
   const setWebhook = mock.calls.find((call) => call.method === "setWebhook");
   assert.ok(setWebhook, "expected a setWebhook call");
   const menuButton = mock.method("setChatMenuButton").at(-1);
-  assert.ok(menuButton, "expected a submit menu button");
-  assert.equal(menuButton.payload.menu_button.type, "web_app");
-  assert.equal(menuButton.payload.menu_button.text, "提交图标");
-  assert.equal(
-    menuButton.payload.menu_button.web_app.url,
-    "https://example.com/submit?startapp=menu",
-  );
+  assert.ok(menuButton, "expected a command menu button");
+  assert.deepEqual(menuButton.payload.menu_button, { type: "commands" });
   const commandCalls = mock.method("setMyCommands");
   assert.equal(commandCalls.length, 2, "expected default and reviewer command menus");
   const defaultCommands = commandCalls.find((call) => call.payload.scope === undefined);
@@ -118,6 +113,11 @@ async function configureTelegram(env, chatId = CHAT_ID) {
     defaultCommands.payload.commands.map((item) => item.command),
     ["start", "icons", "help", "submit", "my"],
   );
+  const commandDescriptions = Object.fromEntries(
+    defaultCommands.payload.commands.map((item) => [item.command, item.description]),
+  );
+  assert.equal(commandDescriptions.start, "快速开始");
+  assert.equal(commandDescriptions.help, "查看帮助");
   assert.deepEqual(
     reviewerCommands.payload.commands.map((item) => item.command),
     ["start", "icons", "help", "submit", "my", "queue", "cancel", "reject", "skip"],
@@ -980,6 +980,7 @@ test("/help sends one formatted card with the live channel content to the admin"
     assert.match(text, /📖 <b>Emby 图标库帮助<\/b>/);
     assert.match(text, /<b>提交与查询<\/b>/);
     assert.match(text, /• \/icons — 获取图标库与导入地址/);
+    assert.match(text, /• \/my — 打开我的提交页面/);
     assert.match(text, /<b>提交要求<\/b>/);
     assert.match(text, /<b>常见问题<\/b>/);
     assert.match(text, /📌 <b>频道公告<\/b>/);
@@ -1185,8 +1186,8 @@ test("a failed menu button does not block saving Telegram settings", async () =>
     assert.equal(response.status, 200);
     assert.equal(body.webhookConfigured, true);
     assert.equal(body.menuConfigured, false);
-    assert.match(body.warning, /提交图标.*菜单设置失败/);
-    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-submit-menu-failed");
+    assert.match(body.warning, /菜单按钮设置失败/);
+    const audit = env.DB.auditLogs.find((entry) => entry.action === "telegram-menu-failed");
     assert.ok(audit, "expected the menu failure to be recorded");
   } finally {
     mock.restore();
@@ -1241,9 +1242,33 @@ test("disabling notifications keeps the webhook and command menus registered", a
     assert.equal(body.webhookConfigured, true);
     assert.equal(mock.method("deleteWebhook").length, 0);
     assert.equal(mock.method("setWebhook").length, 2, "saving should keep the webhook in place");
-    assert.equal(mock.method("setChatMenuButton").at(-1).payload.menu_button.type, "web_app");
+    assert.equal(mock.method("setChatMenuButton").at(-1).payload.menu_button.type, "commands");
     assert.equal(mock.method("setMyCommands").length, 4, "public and reviewer menus remain registered");
     assert.equal(mock.method("deleteMyCommands").length, 0);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a webhook updates the persistent menu button after a command version change", async () => {
+  mock = installTelegramFetchMock();
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+    const menuCallsBefore = mock.method("setChatMenuButton").length;
+    const commandCallsBefore = mock.method("setMyCommands").length;
+
+    await env.EMBY_ICONS.put("settings/telegram/commands-version", "outdated");
+    await message(secret, env, "/start", 32, { userId: "9009", chatId: "9009" });
+
+    const menuButton = mock.method("setChatMenuButton").at(-1);
+    assert.equal(mock.method("setChatMenuButton").length, menuCallsBefore + 1);
+    assert.deepEqual(menuButton.payload.menu_button, { type: "commands" });
+    assert.equal(mock.method("setMyCommands").length, commandCallsBefore + 2);
+    assert.notEqual(
+      await env.EMBY_ICONS.get("settings/telegram/commands-version"),
+      "outdated",
+    );
   } finally {
     mock.restore();
   }
@@ -1590,6 +1615,7 @@ telegramTest("/my and the Telegram submission list expose only the current users
   await message(secret, env, "/my", 31, { userId: "9106", chatId: "9106" });
   const entry = mock.method("sendMessage").at(-1);
   assert.equal(entry.payload.chat_id, "9106");
+  assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].text, "📋 打开我的提交");
   assert.equal(entry.payload.reply_markup.inline_keyboard[0][0].web_app.url, "https://example.com/submit?startapp=my");
 
   const response = await handleMySubmissionList(

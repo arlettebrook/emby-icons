@@ -580,11 +580,8 @@ async function saveRemoteUrl() {
     } else {
       savedRemoteUrls = savedRemoteUrls.filter((saved) => saved.id !== item.id);
       savedRemoteUrls.unshift(item);
+      resetRemoteEditor();
       showToast("已保存远程 JSON 地址");
-    }
-    if (!editingId) {
-      elements.remoteUrl.value = item.url;
-      elements.remoteNote.value = item.note || "";
     }
     remoteUrlsEtag = etag;
     remoteUrlsLoadedAt = Date.now();

@@ -9,11 +9,11 @@ const ANNOUNCEMENT_EMBED_URL = "https://t.me/MikuNaNChannel/8?embed=1&mode=tme";
 const SUBMIT_MINI_APP_URL = "https://t.me/emby_icons_bot/submit";
 const DEFAULT_PUBLIC_ORIGIN = "https://emby-icons.lyra.cc.cd";
 const PUBLIC_COMMANDS = [
-  { command: "start", description: "查看公告与提交入口" },
+  { command: "start", description: "快速开始" },
   { command: "icons", description: "获取图标库与导入地址" },
-  { command: "help", description: "查看帮助与提交入口" },
+  { command: "help", description: "查看帮助" },
   { command: "submit", description: "打开图标提交页面" },
-  { command: "my", description: "查看我的提交" },
+  { command: "my", description: "打开我的提交页面" },
 ];
 const REVIEW_COMMANDS = [
   { command: "queue", description: "查看待审核队列" },
@@ -31,7 +31,7 @@ const CAPTION_LIMIT = 1024;
 const QUEUE_LIMIT = 50;
 const QUEUE_PAGE_SIZE = 10;
 const MAX_EDIT_NOTE_LENGTH = 1000;
-const COMMANDS_VERSION = "20261020-3";
+const COMMANDS_VERSION = "20261021-1";
 const COMMANDS_VERSION_KEY = "settings/telegram/commands-version";
 
 function responseHeaders(request) {
@@ -272,13 +272,12 @@ async function setTelegramWebhook(token, origin, secret) {
   });
 }
 
-async function setTelegramSubmitMenuButton(token, origin = DEFAULT_PUBLIC_ORIGIN) {
+async function setTelegramCommandMenuButton(token) {
+  // The persistent bottom-left button opens Telegram's native command list.
+  // Submission stays available through /submit and the contextual Mini App
+  // buttons, so the menu itself is not mislabeled as a submit action.
   await telegramApi(token, "setChatMenuButton", {
-    menu_button: {
-      type: "web_app",
-      text: "提交图标",
-      web_app: { url: miniAppUrl("menu", origin) },
-    },
+    menu_button: { type: "commands" },
   });
 }
 
@@ -347,7 +346,7 @@ async function rememberCommandsVersion(env) {
   await env.EMBY_ICONS.put(COMMANDS_VERSION_KEY, COMMANDS_VERSION);
 }
 
-async function syncTelegramCommandsIfNeeded(env, settings, waitUntil) {
+async function syncTelegramMenusIfNeeded(env, settings, waitUntil) {
   if (!env.EMBY_ICONS || !settings?.token) return false;
   let stored = "";
   try {
@@ -357,10 +356,22 @@ async function syncTelegramCommandsIfNeeded(env, settings, waitUntil) {
   }
   if (stored === COMMANDS_VERSION) return false;
   const task = (async () => {
+    let failed = false;
+    try {
+      await setTelegramCommandMenuButton(settings.token);
+    } catch (error) {
+      failed = true;
+      await writeAuditLog(env, {
+        actorId: "system",
+        action: "telegram-menu-sync-failed",
+        targetId: COMMANDS_VERSION_KEY,
+        details: { error: String(error?.message || "Menu button sync failed").slice(0, 240) },
+      }).catch(() => {});
+    }
     try {
       await setTelegramCommands(settings.token, settings.chatId);
-      await rememberCommandsVersion(env);
     } catch (error) {
+      failed = true;
       await writeAuditLog(env, {
         actorId: "system",
         action: "telegram-commands-sync-failed",
@@ -368,6 +379,7 @@ async function syncTelegramCommandsIfNeeded(env, settings, waitUntil) {
         details: { error: String(error?.message || "Command menu sync failed").slice(0, 240) },
       }).catch(() => {});
     }
+    if (!failed) await rememberCommandsVersion(env).catch(() => {});
   })();
   if (typeof waitUntil === "function") waitUntil(task);
   else await task;
@@ -479,12 +491,12 @@ async function sendSubmitCommandEntry(env, settings, chatId, messageThreadId) {
 
 async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
   const keyboard = {
-    inline_keyboard: [[miniAppButton("📋 查看我的提交", "my", telegramChatType(chatId), settings.origin)]],
+    inline_keyboard: [[miniAppButton("📋 打开我的提交", "my", telegramChatType(chatId), settings.origin)]],
   };
   try {
     await telegramApi(settings.token, "sendMessage", {
       chat_id: chatId,
-      text: "点击下方按钮查看你通过 Telegram 提交的图标，以及每条记录的审核状态。",
+      text: "点击下方按钮打开我的提交页面，查看每条记录的审核状态。",
       disable_web_page_preview: true,
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
       reply_markup: keyboard,
@@ -499,7 +511,7 @@ async function sendMySubmissionsEntry(env, settings, chatId, messageThreadId) {
     await sendTelegramMessage(
       settings.token,
       chatId,
-      `查看我的提交：${telegramMiniAppUrl("my")}`,
+      `打开我的提交页面：${telegramMiniAppUrl("my")}`,
     ).catch(() => {});
   }
 }
@@ -753,7 +765,7 @@ async function sendHelpEntry(env, settings, chatId, messageThreadId) {
     "<b>提交与查询</b>",
     "• /icons — 获取图标库与导入地址",
     "• /submit — 打开图标提交页面",
-    "• /my — 查看我的提交和审核状态",
+    "• /my — 打开我的提交页面",
     "",
     "<b>提交要求</b>",
     "• 图标名称需唯一，长度为 1–120 个字符",
@@ -1207,11 +1219,11 @@ export async function handleAdminTelegramSettings(request, env) {
       await auditTelegramRuntimeFailure(env, "telegram-webhook-sync-failed", SETTINGS_KEY, error);
     }
     try {
-      await setTelegramSubmitMenuButton(current.token, origin);
+      await setTelegramCommandMenuButton(current.token);
       menuConfigured = true;
     } catch (error) {
-      warnings.push("提交菜单同步失败，命令中的 Mini App 按钮仍可使用。");
-      await auditTelegramRuntimeFailure(env, "telegram-submit-menu-sync-failed", SETTINGS_KEY, error);
+      warnings.push("菜单按钮同步失败，仍可手动输入 /start、/icons 或 /help。");
+      await auditTelegramRuntimeFailure(env, "telegram-menu-sync-failed", SETTINGS_KEY, error);
     }
     try {
       await setTelegramCommands(current.token, current.chatId);
@@ -1330,11 +1342,11 @@ export async function handleAdminTelegramSettings(request, env) {
       await auditTelegramRuntimeFailure(env, "telegram-webhook-failed", SETTINGS_KEY, error);
     }
     try {
-      await setTelegramSubmitMenuButton(token, origin);
+      await setTelegramCommandMenuButton(token);
       menuConfigured = true;
     } catch (error) {
-      warnings.push("「提交图标」菜单设置失败，用户仍可通过 /start 或 /help 进入 Mini App。");
-      await auditTelegramRuntimeFailure(env, "telegram-submit-menu-failed", SETTINGS_KEY, error);
+      warnings.push("菜单按钮设置失败，用户仍可手动输入 /start、/icons 或 /help。");
+      await auditTelegramRuntimeFailure(env, "telegram-menu-failed", SETTINGS_KEY, error);
     }
     try {
       await setTelegramCommands(token, chatId);
@@ -2132,10 +2144,10 @@ export async function handleTelegramWebhook(request, env, secretParam, waitUntil
   // The notification toggle only controls submission/review notifications.\n  // Commands and Mini App entry points must keep working after notifications are disabled.\n  if (!settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== settings.webhookSecret) return new Response("Not found", { status: 404 });
 
-  // Command menus are versioned in KV so a deploy that adds a command does not
-  // depend on an administrator saving the settings again. This check is
-  // best-effort and never blocks update processing.
-  await syncTelegramCommandsIfNeeded(env, settings, waitUntil);
+  // Bot menus are versioned in KV so a deploy that adds a command or changes
+  // the persistent menu button does not depend on an administrator saving the
+  // settings again. This check is best-effort and never blocks updates.
+  await syncTelegramMenusIfNeeded(env, settings, waitUntil);
 
   let update;
   try {

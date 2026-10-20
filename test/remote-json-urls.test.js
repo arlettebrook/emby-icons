@@ -241,13 +241,15 @@ test("admin import UI exposes note editing and direct saved-address fetch contro
   assert.match(script, /remote-history-action remote-history-fetch/);
 });
 
-test("admin import UI clears address inputs after updating or cancelling an edit", async () => {
+test("admin import UI clears address inputs after creating, updating, or cancelling an edit", async () => {
   const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   assert.match(
     script,
     /function resetRemoteEditor\(\{ clearInputs = true \} = \{\}\) \{\s*editingRemoteUrlId = null;\s*if \(clearInputs\) \{\s*elements\.remoteUrl\.value = "";\s*elements\.remoteNote\.value = "";/,
   );
+  assert.match(script, /savedRemoteUrls\.unshift\(item\);\s*resetRemoteEditor\(\);\s*showToast\("已保存远程 JSON 地址"\)/);
   assert.match(script, /resetRemoteEditor\(\);\s*showToast\("已更新远程 JSON 地址"\)/);
+  assert.doesNotMatch(script, /if \(!editingId\) \{\s*elements\.remoteUrl\.value = item\.url/);
   assert.match(script, /remoteEditCancel\.addEventListener\("click", \(\) => \{\s*resetRemoteEditor\(\);/);
 });
 
