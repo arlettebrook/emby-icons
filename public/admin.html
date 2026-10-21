@@ -43,6 +43,7 @@
       .telegram-settings-summary h3 { margin: 3px 0 4px; font-size: 15px; }
       .telegram-settings-summary p:last-child { color: var(--muted); font-size: 12px; line-height: 1.5; }
       .telegram-settings-badge { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); font-size: 11px; }
+      .telegram-settings-badge.is-danger { border-color: rgb(255 113 140 / 38%); background: rgb(255 241 244 / 88%); color: var(--danger); }
       .telegram-settings-body { padding-top: 16px; }
       .telegram-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
       .telegram-settings-heading h3 { margin: 3px 0 5px; font-size: 15px; }
@@ -60,6 +61,14 @@
       .telegram-settings-status.is-error { color: var(--danger); }
       .telegram-settings-status.is-warning { color: var(--muted); }
       .telegram-settings-status.is-success { color: var(--accent); }
+      .telegram-stop-dialog { width: min(500px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
+      .telegram-stop-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
+      .telegram-stop-panel { padding: 24px; border: 1px solid rgb(255 113 140 / 35%); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+      .telegram-stop-panel h2 { margin: 4px 0 10px; }
+      .telegram-stop-lead { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+      .telegram-stop-list { margin: 16px 0; padding: 13px 16px 13px 34px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); color: var(--ink); font-size: 13px; line-height: 1.75; }
+      .telegram-stop-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+      .telegram-stop-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
       .github-proxy-dialog { width: min(620px, calc(100% - 28px)); padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--ink); }
       .github-proxy-dialog::backdrop { background: rgb(2 7 6 / 78%); backdrop-filter: blur(6px); }
       .github-proxy-panel { padding: 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
@@ -300,21 +309,20 @@
         <details class="telegram-settings" id="telegram-settings">
           <summary class="telegram-settings-summary">
             <div>
-              <p class="eyebrow">TELEGRAM NOTIFICATION</p>
-              <h3 id="telegram-settings-title">提交与审核通知</h3>
-              <p>点击展开配置 Telegram Bot 通知。</p>
+              <p class="eyebrow">TELEGRAM BOT</p>
+              <h3 id="telegram-settings-title">Telegram Bot 服务</h3>
+              <p>统一管理提交与审核通知、Bot 命令和审核操作。</p>
             </div>
-            <span class="telegram-settings-badge">通知配置</span>
+            <span class="telegram-settings-badge" id="telegram-settings-badge">未配置</span>
           </summary>
           <div class="telegram-settings-body">
             <div class="telegram-settings-heading">
               <div>
-                <p>普通用户提交后，Telegram Bot 会将提交信息发送到指定会话。</p>
-                <small class="telegram-field-note">关闭通知后 Bot 命令仍可用；彻底关闭 Bot 会注销 Webhook、删除命令菜单并停止响应全部消息。配置会保留，可随时重新启用。</small>
+                <p>Bot 服务运行时，用户可使用命令与 Mini App，管理员会收到提交和审核结果通知。</p>
+                <small class="telegram-field-note">停止服务会注销 Webhook、删除命令菜单，并停止全部通知与交互。Token、Chat ID 和配置会保留，可随时恢复。</small>
               </div>
               <div class="telegram-settings-toggles">
-                <label class="telegram-switch"><input id="telegram-enabled" type="checkbox" />启用提交与审核通知</label>
-                <label class="telegram-switch is-danger" title="注销 Webhook、删除命令菜单并停止响应所有消息"><input id="telegram-bot-disabled" type="checkbox" />彻底关闭 Bot</label>
+                <label class="telegram-switch is-danger" title="停止通知、命令、按钮交互和 Mini App 入口"><input id="telegram-bot-disabled" type="checkbox" />停止 Bot 服务</label>
               </div>
             </div>
             <div class="telegram-settings-grid">
@@ -344,6 +352,24 @@
         <div class="moderation-empty" id="moderation-empty" hidden>没有符合条件的提交。</div>
         <div class="moderation-more-wrap"><button class="button button-secondary" id="moderation-more" type="button" hidden>加载更多</button></div>
       </section>
+      </dialog>
+
+      <dialog class="telegram-stop-dialog" id="telegram-stop-dialog" aria-labelledby="telegram-stop-title">
+        <section class="telegram-stop-panel">
+          <p class="eyebrow">TELEGRAM BOT</p>
+          <h2 id="telegram-stop-title">停止 Bot 服务？</h2>
+          <p class="telegram-stop-lead">停止后，Bot 将不再响应任何用户或管理员操作。</p>
+          <ul class="telegram-stop-list">
+            <li>注销 Webhook，并清空待处理更新。</li>
+            <li>删除命令菜单，重置 Bot 菜单按钮。</li>
+            <li>停止提交通知、审核通知、命令和按钮交互。</li>
+          </ul>
+          <p class="telegram-stop-note">Bot Token、Chat ID 和审核配置会保留。之后取消“停止 Bot 服务”并保存，即可恢复服务。</p>
+          <div class="telegram-stop-actions">
+            <button class="button button-secondary" id="telegram-stop-cancel" type="button">取消</button>
+            <button class="button button-danger" id="telegram-stop-confirm" type="button">确认停止</button>
+          </div>
+        </section>
       </dialog>
 
       <dialog class="versions-dialog" id="versions-dialog">

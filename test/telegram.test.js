@@ -1308,8 +1308,40 @@ test("disabling the Bot removes its webhook, commands, and menu button", async (
     assert.equal(mock.method("setWebhook").length, 1, "saving the disabled state must not restore the webhook");
     assert.equal(await env.EMBY_ICONS.get("settings/telegram/commands-version"), null);
 
+    const callsBeforeBlockedUpdate = mock.calls.length;
     const blocked = await message(secret, env, "/start");
-    assert.equal(blocked.status, 404);
+    assert.equal(blocked.status, 204, "valid stopped-Bot updates must be acknowledged silently");
+    assert.equal(mock.calls.length, callsBeforeBlockedUpdate, "stopped-Bot updates must not be processed");
+
+    const updateBody = JSON.stringify({
+      message: {
+        chat: { id: CHAT_ID, type: "private" },
+        from: { id: USER_ID },
+        message_id: 12,
+        text: "/start",
+      },
+    });
+    const invalidPath = await handleTelegramWebhook(
+      new Request("https://example.com/api/telegram/webhook/wrong-secret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": secret },
+        body: updateBody,
+      }),
+      env,
+      "wrong-secret",
+    );
+    assert.equal(invalidPath.status, 404, "an invalid path secret must remain hidden");
+
+    const missingHeader = await handleTelegramWebhook(
+      new Request(`https://example.com/api/telegram/webhook/${secret}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: updateBody,
+      }),
+      env,
+      secret,
+    );
+    assert.equal(missingHeader.status, 404, "a missing Telegram secret header must remain hidden");
 
     const notified = await notifyNewSubmission(
       env,
@@ -1330,6 +1362,43 @@ test("disabling the Bot removes its webhook, commands, and menu button", async (
     const syncBody = await sync.json();
     assert.equal(sync.status, 409);
     assert.equal(syncBody.code, "TELEGRAM_BOT_DISABLED");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a failed webhook deletion still stops updates with a silent acknowledgement", async () => {
+  mock = installTelegramFetchMock({
+    fail: (method) => (method === "deleteWebhook" ? "Telegram unavailable" : ""),
+  });
+  try {
+    const env = createEnvironment({ icons: [] });
+    const secret = await configureTelegram(env);
+
+    const response = await handleAdminTelegramSettings(
+      new Request("https://example.com/api/admin/telegram", {
+        method: "PUT",
+        headers: adminHeaders(),
+        body: JSON.stringify({ enabled: false, botDisabled: true }),
+      }),
+      env,
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.botDisabled, true);
+    assert.equal(body.webhookDeleted, false);
+    assert.match(body.warning, /Webhook 注销失败/);
+
+    const callsBeforeUpdate = mock.calls.length;
+    const blocked = await message(secret, env, "/start");
+    assert.equal(blocked.status, 204, "Telegram retries must receive a 2xx response");
+    assert.equal(mock.calls.length, callsBeforeUpdate, "the stopped Bot must not process the update");
+    assert.equal(await notifyNewSubmission(
+      env,
+      { id: "failed-delete", name: "FailedDelete", url: "https://example.com/failed.png", note: "" },
+      "https://example.com",
+    ), false);
   } finally {
     mock.restore();
   }
@@ -1360,6 +1429,7 @@ test("re-enabling the Bot restores its webhook and command menus", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 200);
+    assert.equal(body.enabled, true);
     assert.equal(body.botDisabled, false);
     assert.equal(body.webhookConfigured, true);
     assert.equal(body.commandsConfigured, true);
@@ -1369,6 +1439,11 @@ test("re-enabling the Bot restores its webhook and command menus", async () => {
 
     const update = await message(secret, env, "/start");
     assert.equal(update.status, 200);
+    assert.equal(await notifyNewSubmission(
+      env,
+      { id: "restored-bot", name: "RestoredBot", url: "https://example.com/restored.png", note: "" },
+      "https://example.com",
+    ), true, "restoring the Bot must restore submission notifications");
   } finally {
     mock.restore();
   }

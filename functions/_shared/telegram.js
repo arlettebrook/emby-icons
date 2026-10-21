@@ -1047,7 +1047,7 @@ export async function handleAdminTelegramSettings(request, env) {
     if (current.botDisabled) {
       return jsonResponse(request, {
         code: "TELEGRAM_BOT_DISABLED",
-        error: "Bot 已彻底关闭，请先启用 Bot 后再同步 Webhook。",
+        error: "Bot 服务已停止，请先恢复 Bot 服务后再同步 Webhook。",
       }, { status: 409 });
     }
     if (!current.token || !current.webhookSecret) {
@@ -1158,8 +1158,8 @@ export async function handleAdminTelegramSettings(request, env) {
   if (body.clearBotToken === true) token = "";
   if (suppliedBotToken) token = suppliedBotToken;
   if (token.length > MAX_TOKEN_LENGTH) return jsonResponse(request, { error: "botToken is too long" }, { status: 400 });
-  if (enabled && !token) return jsonResponse(request, { error: "启用通知前请填写 Bot Token" }, { status: 400 });
-  if (enabled && !chatId) return jsonResponse(request, { error: "启用通知前请填写 Chat ID" }, { status: 400 });
+  if (enabled && !token) return jsonResponse(request, { error: "启动 Bot 服务前请填写 Bot Token" }, { status: 400 });
+  if (enabled && !chatId) return jsonResponse(request, { error: "启动 Bot 服务前请填写 Chat ID" }, { status: 400 });
 
   const webhookSecret = current.webhookSecret || createSecret();
   const origin = effectivePublicOrigin(env, current, new URL(request.url).origin);
@@ -2043,11 +2043,13 @@ export async function handleTelegramWebhook(request, env, secretParam, waitUntil
   } catch {
     return new Response("Not found", { status: 404 });
   }
-  // The notification toggle only controls submission/review notifications.
-  // The separate botDisabled switch is the hard stop for every Bot update.
-  if (settings.botDisabled) return new Response("Not found", { status: 404 });
+  // Authenticate the request before acknowledging it. While the Bot service is
+  // stopped, valid Telegram retries must receive a 2xx response so Telegram
+  // stops retrying even if deleteWebhook itself failed. Invalid callers still
+  // receive 404 and no update is parsed or executed.
   if (!settings.token || !settings.webhookSecret || secretParam !== settings.webhookSecret) return new Response("Not found", { status: 404 });
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== settings.webhookSecret) return new Response("Not found", { status: 404 });
+  if (settings.botDisabled) return new Response(null, { status: 204 });
 
   // Bot menus are versioned in KV so a deploy that adds a command or changes
   // the persistent menu button does not depend on an administrator saving the
