@@ -16,7 +16,10 @@ const telegramStopDialog = document.querySelector("#telegram-stop-dialog");
 const telegramStopCancelButton = document.querySelector("#telegram-stop-cancel");
 const telegramStopConfirmButton = document.querySelector("#telegram-stop-confirm");
 let telegramConfigured = false;
+let telegramChatConfigured = false;
+let telegramSavedEnabled = false;
 let telegramSavedBotDisabled = false;
+let telegramServiceRunning = false;
 let telegramLegacyNotificationsOff = false;
 let telegramStopConfirmed = false;
 const filter = document.querySelector("#moderation-filter");
@@ -52,31 +55,58 @@ function setTelegramStatus(message, type = "") {
   telegramStatus.className = `telegram-settings-status${type ? ` is-${type}` : ""}`;
 }
 
+function telegramSettingsAreRunning(settings) {
+  return settings.configured === true
+    && Boolean(settings.chatId)
+    && settings.enabled === true
+    && settings.botDisabled !== true
+    && settings.webhookConfigured === true;
+}
+
+function applyTelegramSettingsSnapshot(settings) {
+  telegramConfigured = settings.configured === true;
+  telegramChatConfigured = Boolean(settings.chatId);
+  telegramSavedEnabled = settings.enabled === true;
+  telegramSavedBotDisabled = settings.botDisabled === true;
+  telegramServiceRunning = telegramSettingsAreRunning(settings);
+  telegramBotEnabled.checked = telegramServiceRunning;
+}
+
 function applyTelegramPowerState() {
   const enabled = telegramBotEnabled.checked;
-  const savedDisabled = telegramSavedBotDisabled;
-  const pendingStop = !enabled && !savedDisabled;
-  const pendingRestore = enabled && savedDisabled;
-  telegramSyncButton.disabled = !enabled || savedDisabled;
+  const fullyConfigured = telegramConfigured && telegramChatConfigured;
+  const pendingStop = !enabled && telegramServiceRunning;
+  const pendingStart = enabled && !telegramServiceRunning;
+  telegramSyncButton.disabled = !enabled || !fullyConfigured || telegramSavedBotDisabled;
   telegramSyncButton.title = telegramSyncButton.disabled
-    ? "请先启用 Bot 服务并保存，再同步 Webhook"
+    ? (fullyConfigured
+      ? "请先启用 Bot 服务并保存，再同步 Webhook"
+      : "请先填写并保存 Bot Token 与 Chat ID")
     : "";
   telegramSaveButton.textContent = pendingStop
     ? "保存并停止"
-    : (pendingRestore ? "保存并恢复" : "保存设置");
+    : (pendingStart
+      ? (telegramSavedBotDisabled ? "保存并恢复" : "保存并启用")
+      : "保存设置");
   if (!telegramSettingsBadge) return;
   telegramSettingsBadge.classList.toggle(
     "is-danger",
-    !enabled && (telegramConfigured || savedDisabled),
+    telegramSavedBotDisabled || pendingStop,
   );
-  if (!telegramConfigured && !savedDisabled) {
+  if (!fullyConfigured) {
     telegramSettingsBadge.textContent = "未配置";
-  } else if (!enabled) {
-    telegramSettingsBadge.textContent = pendingStop ? "待停止" : "已停止";
-  } else if (savedDisabled) {
-    telegramSettingsBadge.textContent = "待恢复";
+  } else if (telegramSavedBotDisabled) {
+    telegramSettingsBadge.textContent = enabled ? "待恢复" : "已停止";
+  } else if (pendingStop) {
+    telegramSettingsBadge.textContent = "待停止";
+  } else if (pendingStart) {
+    telegramSettingsBadge.textContent = "待启用";
+  } else if (!telegramSavedEnabled) {
+    telegramSettingsBadge.textContent = "未启用";
+  } else if (!telegramServiceRunning) {
+    telegramSettingsBadge.textContent = "待同步";
   } else {
-    telegramSettingsBadge.textContent = telegramLegacyNotificationsOff ? "待同步" : "运行中";
+    telegramSettingsBadge.textContent = "运行中";
   }
 }
 
@@ -89,12 +119,12 @@ function stoppedTelegramStatus() {
 }
 
 function resetPendingTelegramStop() {
-  telegramBotEnabled.checked = !telegramSavedBotDisabled;
+  telegramBotEnabled.checked = telegramServiceRunning;
   applyTelegramPowerState();
   setTelegramStatus(
-    telegramSavedBotDisabled
-      ? "Bot 服务保持停止状态。"
-      : "已取消停止操作，Bot 服务保持运行。",
+    telegramServiceRunning
+      ? "已取消停止操作，Bot 服务保持运行。"
+      : "已取消停止操作，Bot 服务状态未改变。",
     "warning",
   );
 }
@@ -117,10 +147,11 @@ async function loadTelegramSettings() {
     const response = await fetch("/api/admin/telegram", { headers: adminHeaders(), cache: "no-store" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `加载 Telegram 配置失败（${response.status}）`);
-    telegramConfigured = body.configured === true;
-    telegramSavedBotDisabled = body.botDisabled === true;
-    telegramLegacyNotificationsOff = telegramConfigured && !telegramSavedBotDisabled && body.enabled !== true;
-    telegramBotEnabled.checked = !telegramSavedBotDisabled;
+    applyTelegramSettingsSnapshot(body);
+    telegramLegacyNotificationsOff = telegramConfigured
+      && telegramChatConfigured
+      && !telegramSavedBotDisabled
+      && body.enabled !== true;
     applyTelegramPowerState();
     telegramChatId.value = body.chatId || "";
     telegramBotToken.value = "";
@@ -128,24 +159,36 @@ async function loadTelegramSettings() {
     telegramTokenNote.textContent = body.configured
       ? "当前已配置 Bot Token；留空保存时不会覆盖它。"
       : "Token 会加密保存在服务端，不会回显到页面。";
-    if (telegramSavedBotDisabled) setTelegramStatus(stoppedTelegramStatus(), "warning");
-    else if (!telegramConfigured) setTelegramStatus("Bot 服务尚未配置；填写 Bot Token 与 Chat ID 后保存即可启用。", "warning");
-    else if (telegramLegacyNotificationsOff) setTelegramStatus("Bot 服务运行中，但旧版通知开关处于关闭状态；保存设置后会统一启用通知与命令。", "warning");
-    else setTelegramStatus(runningTelegramStatus(), "success");
+    if (telegramSavedBotDisabled) {
+      setTelegramStatus(stoppedTelegramStatus(), "warning");
+    } else if (!telegramConfigured || !telegramChatConfigured) {
+      setTelegramStatus("Bot 服务尚未配置完整；填写 Bot Token 与 Chat ID，勾选“启用 Bot 服务”并保存即可启用。", "warning");
+    } else if (telegramLegacyNotificationsOff) {
+      setTelegramStatus("Bot 服务已配置但尚未启用；勾选“启用 Bot 服务”并保存即可启用通知与命令。", "warning");
+    } else if (!telegramSavedEnabled) {
+      setTelegramStatus("Bot 服务已配置但尚未启用；勾选“启用 Bot 服务”并保存即可启用。", "warning");
+    } else if (!telegramServiceRunning) {
+      setTelegramStatus("Bot 服务配置已保存，但 Webhook 尚未就绪；勾选“启用 Bot 服务”并保存，或点击「同步 Webhook」。", "warning");
+    } else {
+      setTelegramStatus(runningTelegramStatus(), "success");
+    }
   } catch (error) {
     setTelegramStatus(error.message, "error");
   }
 }
 
 async function persistTelegramSettings() {
-  const stopping = !telegramBotEnabled.checked;
-  const restoring = telegramSavedBotDisabled && telegramBotEnabled.checked;
+  const enabled = telegramBotEnabled.checked;
+  const stopping = !enabled && telegramServiceRunning;
+  const restoring = enabled && !telegramServiceRunning;
   telegramSaveButton.disabled = true;
   telegramSyncButton.disabled = true;
-  setTelegramStatus(stopping ? "正在停止 Bot 服务并清理 Telegram 状态…" : (restoring ? "正在恢复 Bot 服务…" : "正在保存 Bot 服务设置…"));
+  setTelegramStatus(stopping
+    ? "正在停止 Bot 服务并清理 Telegram 状态…"
+    : (restoring ? "正在启用或恢复 Bot 服务…" : "正在保存 Bot 服务设置…"));
   const body = {
-    enabled: telegramBotEnabled.checked,
-    botDisabled: !telegramBotEnabled.checked,
+    enabled,
+    botDisabled: stopping ? true : (enabled ? false : telegramSavedBotDisabled),
     chatId: telegramChatId.value.trim(),
   };
   if (telegramBotToken.value.trim()) body.botToken = telegramBotToken.value.trim();
@@ -157,10 +200,8 @@ async function persistTelegramSettings() {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `保存 Bot 服务设置失败（${response.status}）`);
-    telegramConfigured = result.configured === true;
-    telegramSavedBotDisabled = result.botDisabled === true;
     telegramLegacyNotificationsOff = false;
-    telegramBotEnabled.checked = !telegramSavedBotDisabled;
+    applyTelegramSettingsSnapshot(result);
     applyTelegramPowerState();
     telegramBotToken.value = "";
     telegramBotToken.placeholder = result.configured ? "已配置，留空则保持当前 Token" : "粘贴 Bot Token";
@@ -171,12 +212,15 @@ async function persistTelegramSettings() {
       setTelegramStatus("Bot 服务已停止，但 Telegram 清理未完成；合法更新会被静默确认且不会执行，再次保存可重试清理。", "warning");
     } else if (result.botDisabled) {
       setTelegramStatus(stoppedTelegramStatus(), "success");
+    } else if (!result.configured || !result.chatId) {
+      setTelegramStatus("Bot 服务配置已保存，但尚未配置完整；填写 Bot Token 与 Chat ID 后勾选“启用 Bot 服务”并保存。", "warning");
+    } else if (!result.enabled) {
+      setTelegramStatus("Bot 服务配置已保存但尚未启用；勾选“启用 Bot 服务”并保存即可启用。", "warning");
+    } else if (!telegramServiceRunning) {
+      const reason = result.warning || "Webhook 尚未就绪，请检查部署域名和 Bot Token。";
+      setTelegramStatus(`Bot 服务尚未正常运行；${reason}`, "warning");
     } else if (result.warning) {
-      setTelegramStatus(`Bot 服务已启动；${result.warning}`, "warning");
-    } else if (!result.webhookConfigured && result.configured) {
-      setTelegramStatus("Bot 服务配置已保存，但 Webhook 尚未就绪；请点击「同步 Webhook」。", "warning");
-    } else if (!result.configured) {
-      setTelegramStatus("Bot 服务配置已保存；填写 Bot Token 与 Chat ID 后即可启用。", "warning");
+      setTelegramStatus(`Bot 服务已启用；${result.warning}`, "warning");
     } else {
       setTelegramStatus(runningTelegramStatus(), "success");
     }
@@ -190,7 +234,7 @@ async function persistTelegramSettings() {
 }
 
 function saveTelegramSettings() {
-  if (!telegramBotEnabled.checked && !telegramSavedBotDisabled) {
+  if (!telegramBotEnabled.checked && telegramServiceRunning) {
     requestTelegramStopConfirmation();
     return;
   }
@@ -200,6 +244,10 @@ function saveTelegramSettings() {
 async function syncTelegramWebhook() {
   if (!telegramBotEnabled.checked || telegramSavedBotDisabled) {
     setTelegramStatus("Bot 服务已停止，请先勾选“启用 Bot 服务”并保存设置后再同步 Webhook。", "warning");
+    return;
+  }
+  if (!telegramConfigured || !telegramChatConfigured) {
+    setTelegramStatus("请先填写并保存 Bot Token 与 Chat ID，再同步 Webhook。", "warning");
     return;
   }
   telegramSyncButton.disabled = true;
@@ -212,6 +260,7 @@ async function syncTelegramWebhook() {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `同步 Webhook 失败（${response.status}）`);
+    applyTelegramSettingsSnapshot(result);
     const pending = Number(result.webhook?.pendingUpdateCount || 0);
     const details = [];
     if (pending > 0) details.push(`待处理更新 ${pending} 条`);
@@ -219,7 +268,13 @@ async function syncTelegramWebhook() {
     if (result.webhook?.lastErrorMessage) details.push(`最近错误：${result.webhook.lastErrorMessage}`);
     if (result.warning) details.push(result.warning);
     const suffix = details.length ? `（${details.join("；")}）` : "";
-    setTelegramStatus(`Bot 服务运行正常，Webhook 与命令菜单已同步${suffix}。`, details.length ? "warning" : "success");
+    if (telegramServiceRunning) {
+      setTelegramStatus(`Bot 服务运行正常，Webhook 与命令菜单已同步${suffix}。`, details.length ? "warning" : "success");
+    } else if (!result.enabled) {
+      setTelegramStatus(`Webhook 与命令菜单已同步，但 Bot 服务尚未启用${suffix}。`, "warning");
+    } else {
+      setTelegramStatus(`Webhook 与命令菜单已同步，但 Bot 服务仍未正常运行${suffix}。`, "warning");
+    }
   } catch (error) {
     setTelegramStatus(error.message, "error");
   } finally {
@@ -465,14 +520,21 @@ telegramSaveButton?.addEventListener("click", saveTelegramSettings);
 telegramSyncButton?.addEventListener("click", syncTelegramWebhook);
 telegramBotEnabled?.addEventListener("change", () => {
   applyTelegramPowerState();
+  if (telegramBotEnabled.checked) {
+    setTelegramStatus(
+      telegramServiceRunning
+        ? "Bot 服务保持运行；点击保存可更新当前配置。"
+        : (telegramSavedBotDisabled
+          ? "点击保存后将恢复 Bot 服务、提交与审核通知以及命令菜单。"
+          : "点击保存后将启用 Bot 服务、提交与审核通知以及命令菜单。"),
+      "warning",
+    );
+    return;
+  }
   setTelegramStatus(
-    telegramBotEnabled.checked
-      ? (telegramSavedBotDisabled
-        ? "点击保存后将恢复 Bot 服务、提交与审核通知以及命令菜单。"
-        : "Bot 服务保持启用；点击保存可更新当前配置。")
-      : (telegramSavedBotDisabled
-        ? "Bot 服务保持停止状态；点击保存可重试清理 Telegram 状态。"
-        : "点击保存后将先确认，再停止通知、命令和全部 Bot 交互。"),
+    telegramServiceRunning
+      ? "点击保存后将先确认，再停止通知、命令和全部 Bot 交互。"
+      : "Bot 服务保持未启用状态；点击保存可更新当前配置。",
     "warning",
   );
 });
