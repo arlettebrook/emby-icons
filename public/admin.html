@@ -322,7 +322,7 @@
                 <small class="telegram-field-note">停止服务会注销 Webhook、删除命令菜单，并停止全部通知与交互。Token、Chat ID 和配置会保留，可随时恢复。</small>
               </div>
               <div class="telegram-settings-toggles">
-                <label class="telegram-switch is-danger" title="停止通知、命令、按钮交互和 Mini App 入口"><input id="telegram-bot-disabled" type="checkbox" />停止 Bot 服务</label>
+                <label class="telegram-switch" title="启用通知、命令、按钮交互和 Mini App 入口"><input id="telegram-bot-enabled" type="checkbox" />启用 Bot 服务</label>
               </div>
             </div>
             <div class="telegram-settings-grid">
@@ -364,7 +364,7 @@
             <li>删除命令菜单，重置 Bot 菜单按钮。</li>
             <li>停止提交通知、审核通知、命令和按钮交互。</li>
           </ul>
-          <p class="telegram-stop-note">Bot Token、Chat ID 和审核配置会保留。之后取消“停止 Bot 服务”并保存，即可恢复服务。</p>
+          <p class="telegram-stop-note">Bot Token、Chat ID 和审核配置会保留。之后勾选“启用 Bot 服务”并保存，即可恢复服务。</p>
           <div class="telegram-stop-actions">
             <button class="button button-secondary" id="telegram-stop-cancel" type="button">取消</button>
             <button class="button button-danger" id="telegram-stop-confirm" type="button">确认停止</button>

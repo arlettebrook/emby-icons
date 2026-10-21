@@ -4,7 +4,7 @@ const refreshButton = document.querySelector("#moderation-refresh");
 const dialog = document.querySelector("#moderation-dialog");
 const openButton = document.querySelector("#moderation-open-button");
 const closeButton = document.querySelector("#moderation-close-button");
-const telegramBotDisabled = document.querySelector("#telegram-bot-disabled");
+const telegramBotEnabled = document.querySelector("#telegram-bot-enabled");
 const telegramSettingsBadge = document.querySelector("#telegram-settings-badge");
 const telegramBotToken = document.querySelector("#telegram-bot-token");
 const telegramChatId = document.querySelector("#telegram-chat-id");
@@ -53,23 +53,31 @@ function setTelegramStatus(message, type = "") {
 }
 
 function applyTelegramPowerState() {
-  const disabled = telegramBotDisabled.checked;
+  const enabled = telegramBotEnabled.checked;
   const savedDisabled = telegramSavedBotDisabled;
-  const pendingChange = disabled !== savedDisabled;
-  telegramSyncButton.disabled = disabled || savedDisabled;
+  const pendingStop = !enabled && !savedDisabled;
+  const pendingRestore = enabled && savedDisabled;
+  telegramSyncButton.disabled = !enabled || savedDisabled;
   telegramSyncButton.title = telegramSyncButton.disabled
-    ? "请先恢复 Bot 服务并保存，再同步 Webhook"
+    ? "请先启用 Bot 服务并保存，再同步 Webhook"
     : "";
-  telegramSaveButton.textContent = disabled && !savedDisabled
+  telegramSaveButton.textContent = pendingStop
     ? "保存并停止"
-    : (!disabled && savedDisabled ? "保存并恢复" : "保存设置");
+    : (pendingRestore ? "保存并恢复" : "保存设置");
   if (!telegramSettingsBadge) return;
-  telegramSettingsBadge.classList.toggle("is-danger", disabled);
-  telegramSettingsBadge.textContent = disabled
-    ? (pendingChange ? "待停止" : "已停止")
-    : (savedDisabled
-      ? "待恢复"
-      : (!telegramConfigured ? "未配置" : (telegramLegacyNotificationsOff ? "待同步" : "运行中")));
+  telegramSettingsBadge.classList.toggle(
+    "is-danger",
+    !enabled && (telegramConfigured || savedDisabled),
+  );
+  if (!telegramConfigured && !savedDisabled) {
+    telegramSettingsBadge.textContent = "未配置";
+  } else if (!enabled) {
+    telegramSettingsBadge.textContent = pendingStop ? "待停止" : "已停止";
+  } else if (savedDisabled) {
+    telegramSettingsBadge.textContent = "待恢复";
+  } else {
+    telegramSettingsBadge.textContent = telegramLegacyNotificationsOff ? "待同步" : "运行中";
+  }
 }
 
 function runningTelegramStatus() {
@@ -81,7 +89,7 @@ function stoppedTelegramStatus() {
 }
 
 function resetPendingTelegramStop() {
-  telegramBotDisabled.checked = telegramSavedBotDisabled;
+  telegramBotEnabled.checked = !telegramSavedBotDisabled;
   applyTelegramPowerState();
   setTelegramStatus(
     telegramSavedBotDisabled
@@ -112,7 +120,7 @@ async function loadTelegramSettings() {
     telegramConfigured = body.configured === true;
     telegramSavedBotDisabled = body.botDisabled === true;
     telegramLegacyNotificationsOff = telegramConfigured && !telegramSavedBotDisabled && body.enabled !== true;
-    telegramBotDisabled.checked = telegramSavedBotDisabled;
+    telegramBotEnabled.checked = !telegramSavedBotDisabled;
     applyTelegramPowerState();
     telegramChatId.value = body.chatId || "";
     telegramBotToken.value = "";
@@ -130,14 +138,14 @@ async function loadTelegramSettings() {
 }
 
 async function persistTelegramSettings() {
-  const stopping = telegramBotDisabled.checked;
-  const restoring = telegramSavedBotDisabled && !stopping;
+  const stopping = !telegramBotEnabled.checked;
+  const restoring = telegramSavedBotDisabled && telegramBotEnabled.checked;
   telegramSaveButton.disabled = true;
   telegramSyncButton.disabled = true;
   setTelegramStatus(stopping ? "正在停止 Bot 服务并清理 Telegram 状态…" : (restoring ? "正在恢复 Bot 服务…" : "正在保存 Bot 服务设置…"));
   const body = {
-    enabled: !stopping,
-    botDisabled: stopping,
+    enabled: telegramBotEnabled.checked,
+    botDisabled: !telegramBotEnabled.checked,
     chatId: telegramChatId.value.trim(),
   };
   if (telegramBotToken.value.trim()) body.botToken = telegramBotToken.value.trim();
@@ -152,7 +160,7 @@ async function persistTelegramSettings() {
     telegramConfigured = result.configured === true;
     telegramSavedBotDisabled = result.botDisabled === true;
     telegramLegacyNotificationsOff = false;
-    telegramBotDisabled.checked = telegramSavedBotDisabled;
+    telegramBotEnabled.checked = !telegramSavedBotDisabled;
     applyTelegramPowerState();
     telegramBotToken.value = "";
     telegramBotToken.placeholder = result.configured ? "已配置，留空则保持当前 Token" : "粘贴 Bot Token";
@@ -182,7 +190,7 @@ async function persistTelegramSettings() {
 }
 
 function saveTelegramSettings() {
-  if (telegramBotDisabled.checked && !telegramSavedBotDisabled) {
+  if (!telegramBotEnabled.checked && !telegramSavedBotDisabled) {
     requestTelegramStopConfirmation();
     return;
   }
@@ -190,8 +198,8 @@ function saveTelegramSettings() {
 }
 
 async function syncTelegramWebhook() {
-  if (telegramBotDisabled.checked || telegramSavedBotDisabled) {
-    setTelegramStatus("Bot 服务已停止，请先取消停止并保存设置后再同步 Webhook。", "warning");
+  if (!telegramBotEnabled.checked || telegramSavedBotDisabled) {
+    setTelegramStatus("Bot 服务已停止，请先勾选“启用 Bot 服务”并保存设置后再同步 Webhook。", "warning");
     return;
   }
   telegramSyncButton.disabled = true;
@@ -455,16 +463,16 @@ dialog?.addEventListener("click", (event) => {
 });
 telegramSaveButton?.addEventListener("click", saveTelegramSettings);
 telegramSyncButton?.addEventListener("click", syncTelegramWebhook);
-telegramBotDisabled?.addEventListener("change", () => {
+telegramBotEnabled?.addEventListener("change", () => {
   applyTelegramPowerState();
   setTelegramStatus(
-    telegramBotDisabled.checked
+    telegramBotEnabled.checked
       ? (telegramSavedBotDisabled
-        ? "Bot 服务保持停止状态；点击保存可重试清理 Telegram 状态。"
-        : "点击保存后将先确认，再停止通知、命令和全部 Bot 交互。")
-      : (telegramSavedBotDisabled
         ? "点击保存后将恢复 Bot 服务、提交与审核通知以及命令菜单。"
-        : "已取消停止操作，Bot 服务保持运行。"),
+        : "Bot 服务保持启用；点击保存可更新当前配置。")
+      : (telegramSavedBotDisabled
+        ? "Bot 服务保持停止状态；点击保存可重试清理 Telegram 状态。"
+        : "点击保存后将先确认，再停止通知、命令和全部 Bot 交互。"),
     "warning",
   );
 });
