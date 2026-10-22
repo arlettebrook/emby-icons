@@ -46,7 +46,6 @@
       .image-preview.is-loading p::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 6px; border: 2px solid var(--line-strong); border-top-color: var(--accent-strong); border-radius: 50%; vertical-align: -2px; animation: preview-spin .8s linear infinite; }
       @keyframes preview-spin { to { transform: rotate(360deg); } }
       @media (prefers-reduced-motion: reduce) { .image-preview.is-loading p::before { animation: none; } }
-      .image-preview.is-ok p { color: var(--accent-strong); }
       .image-preview.is-error { border-color: rgb(255 113 140 / 42%); background: rgb(255 113 140 / 8%); }
       .image-preview.is-error p { color: var(--danger); }
       @media (max-width: 680px) { .standalone { width: calc(100% - 28px); padding: 32px 0 48px; } .standalone-card { padding: 22px 18px; } .standalone-form { gap: 14px; } .standalone-form .button { width: 100%; min-height: 44px; } .standalone-links { display: grid; grid-template-columns: 1fr; } .standalone-links .button { width: 100%; } }
@@ -70,17 +69,17 @@
       <section class="standalone-card">
         <p class="eyebrow">EMBY ICONS / COMMUNITY SUBMISSION</p>
         <h1>提交一个图标</h1>
-        <p>提交内容会进入审核队列。审核通过后才会出现在公开图标库中。请使用图标的 HTTPS 直链。</p>
+        <p>审核通过后，图标将加入公开图标库。请使用 HTTPS 图片直链。</p>
         <p class="mini-app-source" id="mini-app-source" hidden>来自频道公告 · 提交后会进入审核队列</p>
         <form class="standalone-form" id="submission-form">
           <label class="field"><span>图标名称</span><input id="name" name="name" maxlength="120" placeholder="请输入图标名称" required autocomplete="off" /></label>
           <small class="name-example" id="name-example">名称需唯一；重名时会按你输入的名称给出建议。</small>
           <span class="name-hint" id="name-hint" hidden></span>
-          <div class="field">
-            <span><label for="url">图标 URL</label></span>
+          <label class="field">
+            <span>图标 URL</span>
             <input id="url" name="url" type="url" maxlength="2048" placeholder="https://example.com/icon.png" required autocomplete="url" aria-describedby="url-hint" />
-            <small class="image-url-hint" id="url-hint">填入 HTTPS 图片直链后自动加载预览。</small>
-          </div>
+            <small class="image-url-hint" id="url-hint">填入图片直链后自动加载预览。</small>
+          </label>
           <div class="image-preview" id="image-preview" role="status" aria-live="polite" hidden></div>
           <label class="field"><span>补充说明（可选）</span><textarea id="note" name="note" maxlength="1000"></textarea></label>
           <div class="turnstile-box" id="turnstile-container"></div>
@@ -94,6 +93,6 @@
       // Configure the public Turnstile site key here when TURNSTILE_SECRET_KEY is enabled.
       window.SUBMISSION_SITE_KEY = "0x4AAAAAAEA794ymUZPuWjYY";
     </script>
-    <script type="module" src="/submit.js?v=20261022-preview3"></script>
+    <script type="module" src="/submit.js?v=20261022-preview4"></script>
   </body>
 </html>

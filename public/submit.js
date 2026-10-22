@@ -1,5 +1,5 @@
 import { addReference } from "./submission-storage.js";
-import { attachImagePreview, imageUrlIssue } from "./image-preview.js?v=20261022-preview2";
+import { attachImagePreview, imageUrlIssue } from "./image-preview.js?v=20261022-preview4";
 
 function readMiniAppStartParam() {
   try {

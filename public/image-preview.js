@@ -72,13 +72,13 @@ export function renderImagePreview(container, value, options = {}) {
   image.loading = "eager";
   image.referrerPolicy = "no-referrer";
   const text = document.createElement("p");
-  text.textContent = "正在加载预览…";
+  text.textContent = "正在加载图片…";
   container.replaceChildren(image, text);
 
   const fail = () => {
     if (token !== container.__previewToken) return;
     stopPreview(container);
-    renderMessage(container, "照片加载失败，请检查图片直链是否可以公开访问，然后重新加载。", "is-error");
+    renderMessage(container, "图片加载失败，请检查链接或更换图片直链。", "is-error");
   };
   image.addEventListener("load", () => {
     if (token !== container.__previewToken) return;
@@ -88,7 +88,7 @@ export function renderImagePreview(container, value, options = {}) {
     }
     stopPreview(container);
     container.className = "image-preview is-ok";
-    text.textContent = "图片可以正常加载。";
+    container.replaceChildren(image);
   });
   image.addEventListener("error", fail);
   container.__previewTimer = setTimeout(fail, PREVIEW_TIMEOUT_MS);
