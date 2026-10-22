@@ -78,15 +78,15 @@ export function renderImagePreview(container, value, options = {}) {
   const fail = () => {
     if (token !== container.__previewToken) return;
     stopPreview(container);
-    renderMessage(container, "该链接可能不是图片或不可公开访问", "is-error");
+    renderMessage(container, "照片加载失败，请检查图片直链是否可以公开访问，然后重新加载。", "is-error");
   };
   image.addEventListener("load", () => {
     if (token !== container.__previewToken) return;
-    stopPreview(container);
     if (!image.naturalWidth) {
       fail();
       return;
     }
+    stopPreview(container);
     container.className = "image-preview is-ok";
     text.textContent = "图片可以正常加载。";
   });
@@ -99,17 +99,36 @@ export function renderImagePreview(container, value, options = {}) {
 export function attachImagePreview(input, container, options = {}) {
   if (!input || !container) return { refresh() {} };
   let timer = 0;
+  let previewValue = null;
   const refresh = () => {
     clearTimeout(timer);
     timer = 0;
-    return renderImagePreview(container, input.value, options);
+    previewValue = input.value.trim();
+    return renderImagePreview(container, previewValue, options);
   };
   const schedule = () => {
     clearTimeout(timer);
+    if (input.value.trim() === previewValue) return;
+    previewValue = null;
+    stopPreview(container);
+    container.hidden = true;
+    container.replaceChildren();
+    if (!input.value.trim()) {
+      refresh();
+      return;
+    }
     timer = setTimeout(refresh, options.debounceMs ?? 350);
   };
+  const refreshIfChanged = () => {
+    if (input.value.trim() !== previewValue) refresh();
+  };
   input.addEventListener("input", schedule);
-  input.addEventListener("blur", refresh);
+  input.addEventListener("change", refreshIfChanged);
+  input.addEventListener("blur", refreshIfChanged);
+  input.form?.addEventListener("reset", () => {
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 0);
+  });
   refresh();
   return { refresh };
 }
